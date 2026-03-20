@@ -148,8 +148,22 @@ def load_google_sheet():
             return None
         spreadsheet = client.open_by_key(GOOGLE_SHEET_ID)
         worksheet = spreadsheet.worksheet(GOOGLE_SHEET_TAB)
-        data = worksheet.get_all_records()
-        return pd.DataFrame(data)
+        rows = worksheet.get_all_values()
+        if not rows:
+            return None
+        headers = rows[0]
+        # Deduplicate headers by appending _2, _3, etc.
+        seen = {}
+        unique_headers = []
+        for h in headers:
+            if h in seen:
+                seen[h] += 1
+                unique_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 1
+                unique_headers.append(h)
+        data = rows[1:]
+        return pd.DataFrame(data, columns=unique_headers)
     except Exception as e:
         st.error(f"Google Sheet error: {e}")
         return None
