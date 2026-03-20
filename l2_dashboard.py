@@ -450,9 +450,16 @@ with tab1:
         selection = st.dataframe(
             page_df[available_cols],
             use_container_width=True,
-            height=min(400, len(page_df) * 40 + 40),
+            height=600,
             on_select="rerun",
             selection_mode="single-row",
+            column_config={
+                "name": st.column_config.TextColumn("Ticket Name", width="large"),
+                "support_person": st.column_config.TextColumn("Support Person", width="medium"),
+                "category": st.column_config.TextColumn("Category", width="medium"),
+                "decision": st.column_config.TextColumn("Decision", width="medium"),
+                "confidence": st.column_config.NumberColumn("Confidence", width="small"),
+            },
         )
 
         # Update selected ticket from row click
