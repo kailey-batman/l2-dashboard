@@ -438,17 +438,17 @@ with tab1:
         ).reset_index(drop=True)
 
         # ── Pagination ──────────────────────────────────────────────────
-        ROWS_PER_PAGE = 25
+        ROWS_PER_PAGE = 50
+        if "current_page" not in st.session_state:
+            st.session_state.current_page = 1
         total_pages = max(1, (len(filtered) + ROWS_PER_PAGE - 1) // ROWS_PER_PAGE)
+        # Clamp page if filters reduced total
+        if st.session_state.current_page > total_pages:
+            st.session_state.current_page = 1
 
-        page_col1, page_col2, page_col3 = st.columns([1, 2, 1])
-        with page_col2:
-            current_page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1)
-        start_idx = (current_page - 1) * ROWS_PER_PAGE
+        start_idx = (st.session_state.current_page - 1) * ROWS_PER_PAGE
         end_idx = min(start_idx + ROWS_PER_PAGE, len(filtered))
         page_df = filtered.iloc[start_idx:end_idx]
-
-        st.markdown(f"*Page {current_page} of {total_pages} ({start_idx+1}-{end_idx} of {len(filtered)} results)*")
 
         # ── Clickable table ────────────────────────────────────────────
         display_cols = ["name", "support_person", "category", "decision", "confidence"]
@@ -457,10 +457,23 @@ with tab1:
         selection = st.dataframe(
             page_df[available_cols],
             use_container_width=True,
-            height=min(400, len(page_df) * 40 + 40),
+            height=600,
             on_select="rerun",
             selection_mode="single-row",
         )
+
+        # ── Pagination arrows below table ──────────────────────────────
+        pg_left, pg_info, pg_right = st.columns([1, 2, 1])
+        with pg_left:
+            if st.button("< Previous", disabled=(st.session_state.current_page <= 1)):
+                st.session_state.current_page -= 1
+                st.rerun()
+        with pg_info:
+            st.markdown(f"<div style='text-align:center; color:#9E9E9E;'>Page {st.session_state.current_page} of {total_pages} &nbsp;|&nbsp; {start_idx+1}-{end_idx} of {len(filtered)} results</div>", unsafe_allow_html=True)
+        with pg_right:
+            if st.button("Next >", disabled=(st.session_state.current_page >= total_pages)):
+                st.session_state.current_page += 1
+                st.rerun()
 
         # Update selected ticket from row click
         if selection and selection.selection and selection.selection.rows:
