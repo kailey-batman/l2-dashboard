@@ -707,59 +707,75 @@ with tab2:
             st.error("No file provided.")
 
         if rows:
+            # Load existing results and find already-analyzed ticket names
+            existing_results = []
+            if os.path.exists(RESULTS_FILE):
+                with open(RESULTS_FILE) as f:
+                    existing_results = json.load(f)
+            analyzed_names = {r["name"] for r in existing_results}
+
+            # Filter to only new/unanalyzed rows
+            new_rows = [r for r in rows if r.get("name", "").strip() not in analyzed_names]
+
             if max_rows > 0:
-                rows = rows[:max_rows]
+                new_rows = new_rows[:max_rows]
 
-            client = Anthropic()
-            results = []
+            if not new_rows:
+                st.info(f"All {len(rows)} tickets have already been analyzed. No new rows to process.")
+            else:
+                st.markdown(f"**{len(new_rows)} new tickets** to analyze ({len(analyzed_names)} already done)")
 
-            st.session_state.analysis_running = True
-            progress_bar = st.progress(0, text="Starting analysis...")
-            status_text = st.empty()
+                client = Anthropic()
+                new_results = []
 
-            for i, row in enumerate(rows):
-                name = row.get("name", "").strip()
-                desc = row.get("description", "").strip()
-                transcript = row.get("Intercom Transcript", "").strip()
+                st.session_state.analysis_running = True
+                progress_bar = st.progress(0, text="Starting analysis...")
+                status_text = st.empty()
 
-                pct = i / len(rows)
-                status = f"[{i+1}/{len(rows)}] {name[:60]}..."
-                progress_bar.progress(pct, text=status)
-                status_text.markdown(f"**Evaluating:** {name[:80]}")
+                for i, row in enumerate(new_rows):
+                    name = row.get("name", "").strip()
+                    desc = row.get("description", "").strip()
+                    transcript = row.get("Intercom Transcript", "").strip()
 
-                st.session_state.analysis_progress = pct
-                st.session_state.analysis_status = status
+                    pct = i / len(new_rows)
+                    status = f"[{i+1}/{len(new_rows)}] {name[:60]}..."
+                    progress_bar.progress(pct, text=status)
+                    status_text.markdown(f"**Evaluating:** {name[:80]}")
 
-                result = evaluate_ticket(client, name, desc, transcript)
-                results.append({
-                    "name": name,
-                    "description": desc[:200],
-                    "decision": result.get("decision", "Error"),
-                    "category": result.get("category", "Other"),
-                    "support_person": result.get("support_person", "Unknown"),
-                    "confidence": result.get("confidence", 0),
-                    "explanation": result.get("explanation", ""),
-                })
+                    st.session_state.analysis_progress = pct
+                    st.session_state.analysis_status = status
 
-                if i < len(rows) - 1:
-                    time.sleep(0.5)
+                    result = evaluate_ticket(client, name, desc, transcript)
+                    new_results.append({
+                        "name": name,
+                        "description": desc[:200],
+                        "decision": result.get("decision", "Error"),
+                        "category": result.get("category", "Other"),
+                        "support_person": result.get("support_person", "Unknown"),
+                        "confidence": result.get("confidence", 0),
+                        "explanation": result.get("explanation", ""),
+                    })
 
-            progress_bar.progress(1.0, text="Complete!")
-            status_text.empty()
+                    if i < len(new_rows) - 1:
+                        time.sleep(0.5)
 
-            st.session_state.analysis_running = False
-            st.session_state.analysis_progress = 0.0
-            st.session_state.analysis_status = ""
+                progress_bar.progress(1.0, text="Complete!")
+                status_text.empty()
 
-            # Save results
-            with open(RESULTS_FILE, "w") as f:
-                json.dump(results, f, indent=2)
+                st.session_state.analysis_running = False
+                st.session_state.analysis_progress = 0.0
+                st.session_state.analysis_status = ""
 
-            # Save history snapshot
-            save_history_snapshot(results)
+                # Merge new results with existing
+                all_results = existing_results + new_results
+                with open(RESULTS_FILE, "w") as f:
+                    json.dump(all_results, f, indent=2)
 
-            st.success(f"Analyzed {len(results)} tickets. Switch to **Results** tab to explore.")
-            st.rerun()
+                # Save history snapshot
+                save_history_snapshot(all_results)
+
+                st.success(f"Analyzed {len(new_results)} new tickets. Total: {len(all_results)}. Switch to **Results** tab to explore.")
+                st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
