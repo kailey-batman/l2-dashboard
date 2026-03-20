@@ -450,40 +450,43 @@ with tab1:
         selection = st.dataframe(
             page_df[available_cols],
             use_container_width=True,
-            height=600,
+            height=min(400, len(page_df) * 40 + 40),
             on_select="rerun",
             selection_mode="single-row",
-            column_config={
-                "name": st.column_config.TextColumn("Ticket Name", width="large"),
-                "support_person": st.column_config.TextColumn("Support Person", width="medium"),
-                "category": st.column_config.TextColumn("Category", width="medium"),
-                "decision": st.column_config.TextColumn("Decision", width="medium"),
-                "confidence": st.column_config.NumberColumn("Confidence", width="small"),
-            },
         )
 
         # Update selected ticket from row click
-        selected_from_table = None
         if selection and selection.selection and selection.selection.rows:
             clicked_idx = selection.selection.rows[0]
             if clicked_idx < len(page_df):
-                selected_from_table = page_df.iloc[clicked_idx]["name"]
+                st.session_state["detail_ticket"] = page_df.iloc[clicked_idx]["name"]
 
         # ── Detail view with override ──────────────────────────────────
         st.divider()
         st.subheader("Ticket Detail View")
         ticket_names = filtered["name"].tolist()
         if ticket_names:
-            # If a row was clicked, use that; otherwise use the selectbox
-            default_idx = 0
-            if selected_from_table and selected_from_table in ticket_names:
-                default_idx = ticket_names.index(selected_from_table)
+            # Determine which ticket to show
+            detail_ticket = st.session_state.get("detail_ticket", None)
+            if detail_ticket and detail_ticket in ticket_names:
+                default_idx = ticket_names.index(detail_ticket)
+            else:
+                default_idx = 0
 
-            selected = st.selectbox("Select a ticket:", ticket_names, index=default_idx, key="detail_select")
+            def on_select_change():
+                st.session_state["detail_ticket"] = st.session_state["detail_select_widget"]
 
-            # Override selectbox with table click
-            if selected_from_table and selected_from_table in ticket_names:
-                selected = selected_from_table
+            selected = st.selectbox(
+                "Select a ticket:",
+                ticket_names,
+                index=default_idx,
+                key="detail_select_widget",
+                on_change=on_select_change,
+            )
+
+            # Always use session state as source of truth
+            if detail_ticket and detail_ticket in ticket_names:
+                selected = detail_ticket
             row = filtered[filtered["name"] == selected].iloc[0]
 
             col_left, col_mid, col_right = st.columns([1, 1, 2])
