@@ -106,22 +106,167 @@ def evaluate_ticket(client, name, description, transcript):
 
 def color_decision(val):
     if val == "L2 Can Support":
-        return "background-color: #d4edda; color: #155724"
+        return "background-color: #0a3d1f; color: #00E676"
     elif val == "L2 Cannot Support":
-        return "background-color: #f8d7da; color: #721c24"
+        return "background-color: #3d0a0a; color: #ff5252"
     elif val == "Partially Supported":
-        return "background-color: #fff3cd; color: #856404"
+        return "background-color: #3d3a0a; color: #FFD740"
     return ""
 
 
 # ── Page Config ─────────────────────────────────────────────────────────────
-st.set_page_config(page_title="L2 Capability Analyzer", page_icon="📋", layout="wide")
+st.set_page_config(page_title="L2 Capability Analyzer", page_icon="logo.svg", layout="wide")
 
-st.title("📋 L2 Capability Analyzer")
-st.markdown("Evaluate whether L2 support can handle each ticket using Claude AI.")
+# ── Custom CSS for dark mode + Fieldguide green ─────────────────────────────
+st.markdown("""
+<style>
+    /* Global dark overrides */
+    .stApp {
+        background-color: #0E1117;
+    }
+
+    /* Header area with logo */
+    .header-container {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 0.5rem 0 1.5rem 0;
+    }
+    .header-container img {
+        width: 48px;
+        height: 48px;
+    }
+    .header-container h1 {
+        color: #00E676;
+        margin: 0;
+        font-size: 2rem;
+    }
+    .header-subtitle {
+        color: #9E9E9E;
+        font-size: 0.95rem;
+        margin-top: -8px;
+        padding-bottom: 1rem;
+    }
+
+    /* Metric cards */
+    [data-testid="stMetric"] {
+        background-color: #1A1F2B;
+        border: 1px solid #2A2F3B;
+        border-radius: 10px;
+        padding: 16px;
+    }
+    [data-testid="stMetricLabel"] {
+        color: #9E9E9E !important;
+    }
+    [data-testid="stMetricValue"] {
+        color: #E0E0E0 !important;
+    }
+    [data-testid="stMetricDelta"] {
+        color: #00E676 !important;
+    }
+
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background-color: #141820;
+        border-right: 1px solid #2A2F3B;
+    }
+    [data-testid="stSidebar"] .stMarkdown h2 {
+        color: #00E676;
+    }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab"] {
+        color: #9E9E9E;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #00E676 !important;
+        border-bottom-color: #00E676 !important;
+    }
+
+    /* Buttons */
+    .stButton > button[kind="primary"] {
+        background-color: #00E676;
+        color: #0E1117;
+        border: none;
+        font-weight: 600;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background-color: #00C853;
+        color: #0E1117;
+    }
+
+    /* Download button */
+    .stDownloadButton > button {
+        background-color: #1A1F2B;
+        color: #00E676;
+        border: 1px solid #00E676;
+    }
+    .stDownloadButton > button:hover {
+        background-color: #00E676;
+        color: #0E1117;
+    }
+
+    /* Expander */
+    .streamlit-expanderHeader {
+        color: #E0E0E0;
+        background-color: #1A1F2B;
+    }
+
+    /* Dividers */
+    hr {
+        border-color: #2A2F3B;
+    }
+
+    /* Selectbox */
+    [data-baseweb="select"] {
+        background-color: #1A1F2B;
+    }
+
+    /* Dataframe */
+    .stDataFrame {
+        border: 1px solid #2A2F3B;
+        border-radius: 8px;
+    }
+
+    /* Success/Error/Warning boxes */
+    .stSuccess {
+        background-color: #0a3d1f;
+        color: #00E676;
+    }
+    .stError {
+        background-color: #3d0a0a;
+        color: #ff5252;
+    }
+    .stWarning {
+        background-color: #3d3a0a;
+        color: #FFD740;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ── Header with logo ────────────────────────────────────────────────────────
+import base64
+
+logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.svg")
+if os.path.exists(logo_path):
+    with open(logo_path, "r") as f:
+        logo_svg = f.read()
+    logo_b64 = base64.b64encode(logo_svg.encode()).decode()
+    st.markdown(f"""
+    <div class="header-container">
+        <img src="data:image/svg+xml;base64,{logo_b64}" />
+        <h1>L2 Capability Analyzer</h1>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    st.title("L2 Capability Analyzer")
+
+st.markdown('<div class="header-subtitle">Evaluate whether L2 support can handle each ticket using Claude AI.</div>', unsafe_allow_html=True)
 
 # ── Sidebar ─────────────────────────────────────────────────────────────────
 with st.sidebar:
+    if os.path.exists(logo_path):
+        st.image(logo_path, width=60)
     st.header("Settings")
     max_rows = st.number_input("Max rows to process (0 = all)", min_value=0, value=10, step=5)
     st.divider()
