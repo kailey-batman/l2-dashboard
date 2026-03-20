@@ -672,6 +672,8 @@ with tab2:
 
     max_rows = st.number_input("Max rows to process (0 = all)", min_value=0, value=10, step=5)
 
+    rerun_all = st.checkbox("Re-analyze all tickets (ignore previous results)", value=False)
+
     data_source = st.radio(
         "Data source:",
         ["Google Sheet (live in railway)", "Upload CSV"],
@@ -709,13 +711,17 @@ with tab2:
         if rows:
             # Load existing results and find already-analyzed ticket names
             existing_results = []
-            if os.path.exists(RESULTS_FILE):
+            if not rerun_all and os.path.exists(RESULTS_FILE):
                 with open(RESULTS_FILE) as f:
                     existing_results = json.load(f)
             analyzed_names = {r["name"] for r in existing_results}
 
-            # Filter to only new/unanalyzed rows
-            new_rows = [r for r in rows if r.get("name", "").strip() not in analyzed_names]
+            # Filter to only new/unanalyzed rows (or all if rerunning)
+            if rerun_all:
+                new_rows = rows
+                existing_results = []  # Clear old results on full rerun
+            else:
+                new_rows = [r for r in rows if r.get("name", "").strip() not in analyzed_names]
 
             if max_rows > 0:
                 new_rows = new_rows[:max_rows]
