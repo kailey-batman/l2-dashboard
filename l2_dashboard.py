@@ -56,9 +56,30 @@ Now evaluate the following support ticket:
 
 Based on the ticket details and L2's defined capabilities, determine whether L2 can support this task.
 
+Also classify the ticket into the single most relevant category from this list:
+- Data Restores
+- Small Code Changes
+- Account Access Issues
+- Configuration Changes
+- Data Exports / Imports
+- User Management
+- Basic Troubleshooting
+- Database Queries
+- Runbook Execution
+- Integration Support
+- Cache / Queue Management
+- Deployment Support
+- Customer Communication
+- New Feature Request
+- Bug Fix (Engineering Required)
+- Security Incident
+- Infrastructure Change
+- Other
+
 Respond with ONLY valid JSON in this exact format (no markdown, no code fences):
 {{
   "decision": "L2 Can Support" or "L2 Cannot Support" or "Partially Supported",
+  "category": "one category from the list above",
   "explanation": "A concise 2-3 sentence explanation of why L2 can or cannot handle this ticket, referencing specific L2 capabilities or gaps."
 }}
 """
@@ -80,7 +101,7 @@ def evaluate_ticket(client, name, description, transcript):
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        return {"decision": "Error", "explanation": f"Parse error: {text[:200]}"}
+        return {"decision": "Error", "category": "Other", "explanation": f"Parse error: {text[:200]}"}
 
 
 def color_decision(val):
@@ -141,6 +162,10 @@ with tab1:
 
     if results_df is not None and not results_df.empty:
         # Summary metrics
+        # Ensure category column exists for older results
+        if "category" not in results_df.columns:
+            results_df["category"] = "Other"
+
         col1, col2, col3, col4 = st.columns(4)
         total = len(results_df)
         supported = len(results_df[results_df["decision"] == "L2 Can Support"])
@@ -154,15 +179,22 @@ with tab1:
 
         st.divider()
 
-        # Filter
-        filter_option = st.selectbox(
-            "Filter by decision:",
-            ["All", "L2 Can Support", "L2 Cannot Support", "Partially Supported"],
-        )
+        # Filters
+        col_filter1, col_filter2 = st.columns(2)
+        with col_filter1:
+            filter_option = st.selectbox(
+                "Filter by decision:",
+                ["All", "L2 Can Support", "L2 Cannot Support", "Partially Supported"],
+            )
+        with col_filter2:
+            categories = ["All"] + sorted(results_df["category"].unique().tolist())
+            filter_category = st.selectbox("Filter by category:", categories)
+
+        filtered = results_df
         if filter_option != "All":
-            filtered = results_df[results_df["decision"] == filter_option]
-        else:
-            filtered = results_df
+            filtered = filtered[filtered["decision"] == filter_option]
+        if filter_category != "All":
+            filtered = filtered[filtered["category"] == filter_category]
 
         # Styled table
         st.dataframe(
@@ -188,6 +220,7 @@ with tab1:
                 else:
                     st.warning(f"**{decision}**")
             with col_right:
+                st.markdown(f"**Category:** {row.get('category', 'Other')}")
                 st.markdown(f"**Explanation:** {row['explanation']}")
             if "description" in row and row["description"]:
                 with st.expander("Description"):
@@ -246,6 +279,7 @@ with tab2:
                     "name": name,
                     "description": desc[:200],
                     "decision": result.get("decision", "Error"),
+                    "category": result.get("category", "Other"),
                     "explanation": result.get("explanation", ""),
                 })
 
