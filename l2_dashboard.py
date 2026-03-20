@@ -78,6 +78,8 @@ Also classify the ticket into the single most relevant category from this list:
 - Infrastructure Change
 - Other
 
+Also identify the support person who was handling customer communication for this ticket. Look for names of support agents, representatives, or team members in the Intercom transcript and description who were responding to or assisting the customer. This is the internal support person, NOT the customer. If you cannot identify a specific support person, use "Unknown".
+
 Also rate your confidence in this decision from 1 to 5:
 - 1 = Very uncertain, could easily go either way
 - 2 = Somewhat uncertain, limited information
@@ -89,6 +91,7 @@ Respond with ONLY valid JSON in this exact format (no markdown, no code fences):
 {{
   "decision": "L2 Can Support" or "L2 Cannot Support" or "Partially Supported",
   "category": "one category from the list above",
+  "support_person": "Name of the support person handling the ticket, or Unknown",
   "confidence": 1-5,
   "explanation": "A concise 2-3 sentence explanation of why L2 can or cannot handle this ticket, referencing specific L2 capabilities or gaps."
 }}
@@ -117,7 +120,7 @@ def evaluate_ticket(client, name, description, transcript):
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        return {"decision": "Error", "category": "Other", "confidence": 0, "explanation": f"Parse error: {text[:200]}"}
+        return {"decision": "Error", "category": "Other", "support_person": "Unknown", "confidence": 0, "explanation": f"Parse error: {text[:200]}"}
 
 
 def color_decision(val):
@@ -139,6 +142,8 @@ def load_results():
             df["category"] = "Other"
         if "confidence" not in df.columns:
             df["confidence"] = 0
+        if "support_person" not in df.columns:
+            df["support_person"] = "Unknown"
         return df
     return None
 
@@ -438,7 +443,7 @@ with tab1:
         st.markdown(f"*Page {current_page} of {total_pages} ({start_idx+1}-{end_idx} of {len(filtered)} results)*")
 
         # ── Clickable table ────────────────────────────────────────────
-        display_cols = ["name", "category", "decision", "confidence", "explanation"]
+        display_cols = ["name", "support_person", "category", "decision", "confidence", "explanation"]
         available_cols = [c for c in display_cols if c in page_df.columns]
 
         if "selected_ticket" not in st.session_state:
@@ -486,6 +491,7 @@ with tab1:
                 stars = "★" * conf + "☆" * (5 - conf)
                 st.markdown(f"**Confidence:** <span class='confidence-stars'>{stars}</span> ({conf}/5)", unsafe_allow_html=True)
                 st.markdown(f"**Category:** {row.get('category', 'Other')}")
+                st.markdown(f"**Support Person:** {row.get('support_person', 'Unknown')}")
 
             with col_right:
                 st.markdown(f"**Explanation:** {row['explanation']}")
@@ -605,6 +611,7 @@ with tab2:
                     "description": desc[:200],
                     "decision": result.get("decision", "Error"),
                     "category": result.get("category", "Other"),
+                    "support_person": result.get("support_person", "Unknown"),
                     "confidence": result.get("confidence", 0),
                     "explanation": result.get("explanation", ""),
                 })
