@@ -447,11 +447,8 @@ with tab1:
         display_cols = ["name", "support_person", "category", "decision", "confidence"]
         available_cols = [c for c in display_cols if c in page_df.columns]
 
-        if "selected_ticket" not in st.session_state:
-            st.session_state.selected_ticket = None
-
         selection = st.dataframe(
-            page_df[available_cols].style.applymap(color_decision, subset=["decision"]),
+            page_df[available_cols],
             use_container_width=True,
             height=min(400, len(page_df) * 40 + 40),
             on_select="rerun",
@@ -459,22 +456,27 @@ with tab1:
         )
 
         # Update selected ticket from row click
+        selected_from_table = None
         if selection and selection.selection and selection.selection.rows:
             clicked_idx = selection.selection.rows[0]
             if clicked_idx < len(page_df):
-                st.session_state.selected_ticket = page_df.iloc[clicked_idx]["name"]
+                selected_from_table = page_df.iloc[clicked_idx]["name"]
 
         # ── Detail view with override ──────────────────────────────────
         st.divider()
         st.subheader("Ticket Detail View")
         ticket_names = filtered["name"].tolist()
         if ticket_names:
-            # Default to clicked row if available, otherwise first ticket
+            # If a row was clicked, use that; otherwise use the selectbox
             default_idx = 0
-            if st.session_state.selected_ticket and st.session_state.selected_ticket in ticket_names:
-                default_idx = ticket_names.index(st.session_state.selected_ticket)
+            if selected_from_table and selected_from_table in ticket_names:
+                default_idx = ticket_names.index(selected_from_table)
 
             selected = st.selectbox("Select a ticket:", ticket_names, index=default_idx, key="detail_select")
+
+            # Override selectbox with table click
+            if selected_from_table and selected_from_table in ticket_names:
+                selected = selected_from_table
             row = filtered[filtered["name"] == selected].iloc[0]
 
             col_left, col_mid, col_right = st.columns([1, 1, 2])
