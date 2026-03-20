@@ -12,6 +12,8 @@ import os
 import base64
 from datetime import datetime
 from anthropic import Anthropic
+import gspread
+from google.oauth2.service_account import Credentials
 
 # ── L2 Supported Capabilities ──────────────────────────────────────────────
 L2_CAPABILITIES = """
@@ -105,17 +107,46 @@ HISTORY_DIR = os.path.join(APP_DIR, "history")
 
 GOOGLE_SHEET_ID = "1geFofNfnQb0Y2io7Nsk0-FtHwYPmSr9OswL5_fwdgm8"
 GOOGLE_SHEET_TAB = "live in railway"
-GOOGLE_SHEET_CSV_URL = f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEET_ID}/gviz/tq?tqx=out:csv&sheet={GOOGLE_SHEET_TAB.replace(' ', '%20')}"
 GOOGLE_SHEET_EMBED_URL = f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEET_ID}/edit?gid=0&rm=minimal"
+
+# Service account credentials - check for file or Streamlit secrets
+SERVICE_ACCOUNT_FILE = os.path.join(APP_DIR, "service_account.json")
+
+
+def get_gspread_client():
+    """Get authenticated gspread client."""
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ]
+    # Try env var first (for Railway), then Streamlit secrets, then local file
+    env_creds = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    if env_creds:
+        creds_dict = json.loads(env_creds)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    elif hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    elif os.path.exists(SERVICE_ACCOUNT_FILE):
+        creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
+    else:
+        return None
+    return gspread.authorize(creds)
 
 
 @st.cache_data(ttl=60)
 def load_google_sheet():
     """Fetch the Google Sheet as a DataFrame. Cached for 60 seconds."""
     try:
-        df = pd.read_csv(GOOGLE_SHEET_CSV_URL)
-        return df
+        client = get_gspread_client()
+        if client is None:
+            return None
+        spreadsheet = client.open_by_key(GOOGLE_SHEET_ID)
+        worksheet = spreadsheet.worksheet(GOOGLE_SHEET_TAB)
+        data = worksheet.get_all_records()
+        return pd.DataFrame(data)
     except Exception as e:
+        st.error(f"Google Sheet error: {e}")
         return None
 
 
