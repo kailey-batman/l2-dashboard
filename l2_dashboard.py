@@ -460,21 +460,38 @@ with tab1:
 
         st.markdown(f"*Page {current_page} of {total_pages} ({start_idx+1}-{end_idx} of {len(filtered)} results)*")
 
-        # ── Styled table ────────────────────────────────────────────────
+        # ── Clickable table ────────────────────────────────────────────
         display_cols = ["name", "category", "decision", "confidence", "explanation"]
         available_cols = [c for c in display_cols if c in page_df.columns]
-        st.dataframe(
+
+        if "selected_ticket" not in st.session_state:
+            st.session_state.selected_ticket = None
+
+        selection = st.dataframe(
             page_df[available_cols].style.applymap(color_decision, subset=["decision"]),
             use_container_width=True,
             height=min(400, len(page_df) * 40 + 40),
+            on_select="rerun",
+            selection_mode="single-row",
         )
+
+        # Update selected ticket from row click
+        if selection and selection.selection and selection.selection.rows:
+            clicked_idx = selection.selection.rows[0]
+            if clicked_idx < len(page_df):
+                st.session_state.selected_ticket = page_df.iloc[clicked_idx]["name"]
 
         # ── Detail view with override ──────────────────────────────────
         st.divider()
         st.subheader("Ticket Detail View")
         ticket_names = filtered["name"].tolist()
         if ticket_names:
-            selected = st.selectbox("Select a ticket:", ticket_names, key="detail_select")
+            # Default to clicked row if available, otherwise first ticket
+            default_idx = 0
+            if st.session_state.selected_ticket and st.session_state.selected_ticket in ticket_names:
+                default_idx = ticket_names.index(st.session_state.selected_ticket)
+
+            selected = st.selectbox("Select a ticket:", ticket_names, index=default_idx, key="detail_select")
             row = filtered[filtered["name"] == selected].iloc[0]
 
             col_left, col_mid, col_right = st.columns([1, 1, 2])
