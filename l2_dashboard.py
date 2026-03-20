@@ -120,16 +120,21 @@ def get_gspread_client():
         "https://www.googleapis.com/auth/drive.readonly",
     ]
     # Try env var first (for Railway), then Streamlit secrets, then local file
+    creds = None
     env_creds = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     if env_creds:
         creds_dict = json.loads(env_creds)
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    elif hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    elif os.path.exists(SERVICE_ACCOUNT_FILE):
-        creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
     else:
+        try:
+            if "gcp_service_account" in st.secrets:
+                creds_dict = dict(st.secrets["gcp_service_account"])
+                creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        except Exception:
+            pass
+    if creds is None and os.path.exists(SERVICE_ACCOUNT_FILE):
+        creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
+    if creds is None:
         return None
     return gspread.authorize(creds)
 
