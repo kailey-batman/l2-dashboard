@@ -239,7 +239,8 @@ st.markdown("""
     .streamlit-expanderHeader { color: #E0E0E0; background-color: #1A1F2B; }
     hr { border-color: #2A2F3B; }
     [data-baseweb="select"] { background-color: #1A1F2B; }
-    .stDataFrame { border: 1px solid #2A2F3B; border-radius: 8px; }
+    .stDataFrame { border: 1px solid #2A2F3B; border-radius: 8px; overflow-x: auto !important; }
+    .stDataFrame [data-testid="stDataFrameResizable"] { width: 100% !important; min-width: 0 !important; }
 
     /* Category stats cards */
     .cat-stat-card {
@@ -443,7 +444,7 @@ with tab1:
         st.markdown(f"*Page {current_page} of {total_pages} ({start_idx+1}-{end_idx} of {len(filtered)} results)*")
 
         # ── Clickable table ────────────────────────────────────────────
-        display_cols = ["name", "support_person", "category", "decision", "confidence", "explanation"]
+        display_cols = ["name", "support_person", "category", "decision", "confidence"]
         available_cols = [c for c in display_cols if c in page_df.columns]
 
         if "selected_ticket" not in st.session_state:
