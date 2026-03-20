@@ -381,23 +381,37 @@ with tab1:
 
         st.divider()
 
-        # ── Search & Filters ────────────────────────────────────────────
-        search_query = st.text_input("Search tickets (name or description):", placeholder="Type to search...")
+        # ── Search, Filters & Sort (collapsed by default) ──────────────
+        search_query = ""
+        filter_option = "All"
+        filter_category = "All"
+        confidence_filter = "All"
+        sort_by = "name"
+        sort_order = "Ascending"
 
-        col_f1, col_f2, col_f3 = st.columns(3)
-        with col_f1:
-            filter_option = st.selectbox(
-                "Filter by decision:",
-                ["All", "L2 Can Support", "L2 Cannot Support", "Partially Supported"],
-            )
-        with col_f2:
-            categories = ["All"] + sorted(results_df["category"].unique().tolist())
-            filter_category = st.selectbox("Filter by category:", categories)
-        with col_f3:
-            confidence_filter = st.selectbox(
-                "Filter by confidence:",
-                ["All", "Low (1-2)", "Medium (3)", "High (4-5)"],
-            )
+        with st.expander("Search, Filter & Sort", expanded=False):
+            search_query = st.text_input("Search tickets (name or description):", placeholder="Type to search...")
+
+            col_f1, col_f2, col_f3 = st.columns(3)
+            with col_f1:
+                filter_option = st.selectbox(
+                    "Filter by decision:",
+                    ["All", "L2 Can Support", "L2 Cannot Support", "Partially Supported"],
+                )
+            with col_f2:
+                categories = ["All"] + sorted(results_df["category"].unique().tolist())
+                filter_category = st.selectbox("Filter by category:", categories)
+            with col_f3:
+                confidence_filter = st.selectbox(
+                    "Filter by confidence:",
+                    ["All", "Low (1-2)", "Medium (3)", "High (4-5)"],
+                )
+
+            sort_col1, sort_col2 = st.columns([2, 1])
+            with sort_col1:
+                sort_by = st.selectbox("Sort by:", ["name", "decision", "category", "confidence"])
+            with sort_col2:
+                sort_order = st.selectbox("Order:", ["Ascending", "Descending"])
 
         filtered = results_df.copy()
         if search_query:
@@ -418,13 +432,6 @@ with tab1:
             filtered = filtered[filtered["confidence"] >= 4]
 
         st.markdown(f"**Showing {len(filtered)} of {total} tickets**")
-
-        # ── Sort ────────────────────────────────────────────────────────
-        sort_col1, sort_col2 = st.columns([2, 1])
-        with sort_col1:
-            sort_by = st.selectbox("Sort by:", ["name", "decision", "category", "confidence"])
-        with sort_col2:
-            sort_order = st.selectbox("Order:", ["Ascending", "Descending"])
         filtered = filtered.sort_values(
             by=sort_by,
             ascending=(sort_order == "Ascending")
@@ -488,6 +495,8 @@ with tab1:
             if detail_ticket and detail_ticket in ticket_names:
                 selected = detail_ticket
             row = filtered[filtered["name"] == selected].iloc[0]
+
+            st.markdown(f"### {selected}")
 
             col_left, col_mid, col_right = st.columns([1, 1, 2])
             with col_left:
