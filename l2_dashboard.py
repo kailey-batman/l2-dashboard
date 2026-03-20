@@ -355,29 +355,6 @@ with tab1:
 
         st.divider()
 
-        # ── Charts ──────────────────────────────────────────────────────
-        chart_col1, chart_col2 = st.columns(2)
-
-        with chart_col1:
-            st.markdown("**Decision Distribution**")
-            decision_counts = results_df["decision"].value_counts()
-            chart_data = pd.DataFrame({
-                "Decision": decision_counts.index,
-                "Count": decision_counts.values
-            })
-            st.bar_chart(chart_data, x="Decision", y="Count", color="#00E676")
-
-        with chart_col2:
-            st.markdown("**Category Breakdown**")
-            cat_counts = results_df["category"].value_counts()
-            chart_data2 = pd.DataFrame({
-                "Category": cat_counts.index,
-                "Count": cat_counts.values
-            })
-            st.bar_chart(chart_data2, x="Category", y="Count", color="#00E676")
-
-        st.divider()
-
         # ── Category summary stats ──────────────────────────────────────
         with st.expander("Category Summary Stats"):
             for cat in sorted(results_df["category"].unique()):
@@ -657,29 +634,62 @@ with tab2:
 # TAB 3: TRENDS
 # ═══════════════════════════════════════════════════════════════════════════
 with tab3:
-    st.subheader("Trend Tracking")
-    st.markdown("Track how L2 coverage changes across analysis runs over time.")
+    st.subheader("Trends & Charts")
 
-    history = load_history()
-    if history:
-        hist_df = pd.DataFrame(history)
-        hist_df["date"] = pd.to_datetime(hist_df["date"])
-        hist_df = hist_df.sort_values("date")
+    trends_df = load_results()
+    if trends_df is not None and not trends_df.empty:
+        if "category" not in trends_df.columns:
+            trends_df["category"] = "Other"
 
-        st.markdown("**L2 Coverage % Over Time**")
-        st.line_chart(hist_df.set_index("date")["L2 Coverage %"], color="#00E676")
+        # ── Current snapshot charts ─────────────────────────────────
+        chart_col1, chart_col2 = st.columns(2)
 
-        st.markdown("**Decision Breakdown Over Time**")
-        breakdown = hist_df.set_index("date")[["L2 Can Support", "L2 Cannot Support", "Partially Supported"]]
-        st.area_chart(breakdown)
+        with chart_col1:
+            st.markdown("**Decision Distribution**")
+            decision_counts = trends_df["decision"].value_counts()
+            chart_data = pd.DataFrame({
+                "Decision": decision_counts.index,
+                "Count": decision_counts.values
+            })
+            st.bar_chart(chart_data, x="Decision", y="Count", color="#00E676")
+
+        with chart_col2:
+            st.markdown("**Category Breakdown**")
+            cat_counts = trends_df["category"].value_counts()
+            chart_data2 = pd.DataFrame({
+                "Category": cat_counts.index,
+                "Count": cat_counts.values
+            })
+            st.bar_chart(chart_data2, x="Category", y="Count", color="#00E676")
 
         st.divider()
-        st.markdown("**Run History**")
-        display_hist = hist_df.copy()
-        display_hist["date"] = display_hist["date"].dt.strftime("%Y-%m-%d %H:%M")
-        st.dataframe(display_hist, use_container_width=True)
+
+        # ── Historical trends ───────────────────────────────────────
+        st.subheader("Historical Trends")
+        st.markdown("Track how L2 coverage changes across analysis runs over time.")
+
+        history = load_history()
+        if history:
+            hist_df = pd.DataFrame(history)
+            hist_df["date"] = pd.to_datetime(hist_df["date"])
+            hist_df = hist_df.sort_values("date")
+
+            st.markdown("**L2 Coverage % Over Time**")
+            st.line_chart(hist_df.set_index("date")["L2 Coverage %"], color="#00E676")
+
+            st.markdown("**Decision Breakdown Over Time**")
+            breakdown = hist_df.set_index("date")[["L2 Can Support", "L2 Cannot Support", "Partially Supported"]]
+            st.area_chart(breakdown)
+
+            st.divider()
+            st.markdown("**Run History**")
+            display_hist = hist_df.copy()
+            display_hist["date"] = display_hist["date"].dt.strftime("%Y-%m-%d %H:%M")
+            st.dataframe(display_hist, use_container_width=True)
+        else:
+            st.info("No historical data yet. Each time you run an analysis, a snapshot is saved here.")
     else:
-        st.info("No historical data yet. Each time you run an analysis, a snapshot is saved here automatically.")
+        st.info("No results yet. Run an analysis first to see charts and trends.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
