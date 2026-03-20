@@ -267,9 +267,6 @@ st.markdown('<div class="header-subtitle">Evaluate whether L2 support can handle
 with st.sidebar:
     if os.path.exists(logo_path):
         st.image(logo_path, width=60)
-    st.header("Settings")
-    max_rows = st.number_input("Max rows to process (0 = all)", min_value=0, value=10, step=5)
-    st.divider()
     st.header("L2 Capabilities")
     st.markdown("""
     1. Data Restores
@@ -386,6 +383,7 @@ with tab1:
 with tab2:
     st.subheader("Run New Analysis")
 
+    max_rows = st.number_input("Max rows to process (0 = all)", min_value=0, value=10, step=5)
     uploaded = st.file_uploader("Upload a CSV file with ticket data", type=["csv"])
     default_path = "/Users/kaileythorpe/Downloads/Ticket Escalation Tracker 2 (1).csv"
 
