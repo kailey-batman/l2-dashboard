@@ -519,8 +519,16 @@ with tab1:
         display_cols = ["name", "support_person", "category", "decision", "confidence"]
         available_cols = [c for c in display_cols if c in page_df.columns]
 
+        # Color-code decisions with indicators
+        styled_page = page_df[available_cols].copy()
+        styled_page["decision"] = styled_page["decision"].map({
+            "L2 Can Support": "\u2705 L2 Can Support",
+            "L2 Cannot Support": "\u274c L2 Cannot Support",
+            "Partially Supported": "\u26a0\ufe0f Partially Supported",
+        }).fillna(styled_page.get("decision", ""))
+
         selection = st.dataframe(
-            page_df[available_cols],
+            styled_page,
             use_container_width=True,
             height=600,
             on_select="rerun",
