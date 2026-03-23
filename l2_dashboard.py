@@ -56,7 +56,13 @@ Now evaluate the following support ticket:
 {description}
 
 **Intercom Transcript:**
-{transcript}
+{intercom_transcript}
+
+**Slack Conversation:**
+{slack_transcript}
+
+**Shortcut Ticket Activity:**
+{shortcut_activity}
 
 Based on the ticket details and L2's defined capabilities, determine whether L2 can support this task.
 
@@ -176,12 +182,14 @@ def load_google_sheet():
         return None
 
 
-def evaluate_ticket(client, name, description, transcript):
+def evaluate_ticket(client, name, description, intercom_transcript="", slack_transcript="", shortcut_activity=""):
     prompt = EVALUATION_PROMPT.format(
         capabilities=L2_CAPABILITIES,
         name=name or "(no name)",
         description=description or "(no description)",
-        transcript=transcript or "(no transcript)",
+        intercom_transcript=intercom_transcript or "(none)",
+        slack_transcript=slack_transcript or "(none)",
+        shortcut_activity=shortcut_activity or "(none)",
     )
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
@@ -819,7 +827,9 @@ with tab2:
                 for i, row in enumerate(new_rows):
                     name = row.get("name", "").strip()
                     desc = row.get("description", "").strip()
-                    transcript = row.get("Intercom Transcript", "").strip()
+                    intercom_transcript = row.get("Intercom Transcript", "").strip()
+                    slack_transcript = row.get("Slack Conversation Transcript", "").strip()
+                    shortcut_activity = row.get("Shortcut Ticket Activity", "").strip()
 
                     pct = i / len(new_rows)
                     status = f"[{i+1}/{len(new_rows)}] {name[:60]}..."
@@ -829,7 +839,7 @@ with tab2:
                     st.session_state.analysis_progress = pct
                     st.session_state.analysis_status = status
 
-                    result = evaluate_ticket(client, name, desc, transcript)
+                    result = evaluate_ticket(client, name, desc, intercom_transcript, slack_transcript, shortcut_activity)
                     new_results.append({
                         "name": name,
                         "description": desc[:200],
