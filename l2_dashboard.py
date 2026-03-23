@@ -64,7 +64,9 @@ Now evaluate the following support ticket:
 **Shortcut Ticket Activity:**
 {shortcut_activity}
 
-Based on the ticket details and L2's defined capabilities, determine whether L2 can support this task.
+IMPORTANT: First assess whether there is enough information to make a meaningful evaluation. If the ticket has very little data — for example, only a title with no description, no transcripts, no Shortcut activity, and no Slack conversation — then you do NOT have enough context to evaluate it. In that case, set the decision to "Insufficient Data".
+
+If there IS enough data, determine whether L2 can support this task based on the ticket details and L2's defined capabilities.
 
 Also classify the ticket into the single most relevant category from this list:
 - Data Restores
@@ -102,7 +104,7 @@ Also rate your confidence in this decision from 1 to 5:
 
 Respond with ONLY valid JSON in this exact format (no markdown, no code fences):
 {{
-  "decision": "L2 Can Support" or "L2 Cannot Support" or "Partially Supported",
+  "decision": "L2 Can Support" or "L2 Cannot Support" or "Partially Supported" or "Insufficient Data",
   "category": "one category from the list above",
   "support_person": "Name of the support person handling the ticket, or Unknown",
   "l2_engineer": "Sean" or "Jayson" or "None",
@@ -421,18 +423,20 @@ with tab1:
         # ── Summary metrics ─────────────────────────────────────────────
         # ── Summary metrics row 1: L2 capability ─────────────────────
         st.markdown("**L2 Capability Assessment**")
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         total = len(results_df)
         supported = len(results_df[results_df["decision"] == "L2 Can Support"])
         unsupported = len(results_df[results_df["decision"] == "L2 Cannot Support"])
         partial = len(results_df[results_df["decision"] == "Partially Supported"])
-        avg_conf = results_df["confidence"].mean() if "confidence" in results_df.columns else 0
+        insufficient = len(results_df[results_df["decision"] == "Insufficient Data"])
+        avg_conf = results_df[results_df["decision"] != "Insufficient Data"]["confidence"].mean() if "confidence" in results_df.columns else 0
 
         col1.metric("Total Escalations", total)
-        col2.metric("L2 Can Support", supported, delta=f"{supported/total*100:.0f}%")
-        col3.metric("L2 Cannot Support", unsupported, delta=f"{unsupported/total*100:.0f}%", delta_color="inverse")
+        col2.metric("L2 Can Support", supported, delta=f"{supported/total*100:.0f}%" if total > 0 else "0%")
+        col3.metric("L2 Cannot Support", unsupported, delta=f"{unsupported/total*100:.0f}%" if total > 0 else "0%", delta_color="inverse")
         col4.metric("Partially Supported", partial)
-        col5.metric("Avg Confidence", f"{avg_conf:.1f}/5")
+        col5.metric("Insufficient Data", insufficient)
+        col6.metric("Avg Confidence", f"{avg_conf:.1f}/5")
 
         # ── Summary metrics row 2: Actual L2 involvement ─────────────
         st.markdown("**Actual L2 Engineer Involvement**")
@@ -506,7 +510,7 @@ with tab1:
             with col_f1:
                 filter_option = st.selectbox(
                     "Filter by decision:",
-                    ["All", "L2 Can Support", "L2 Cannot Support", "Partially Supported"],
+                    ["All", "L2 Can Support", "L2 Cannot Support", "Partially Supported", "Insufficient Data"],
                 )
             with col_f2:
                 categories = ["All"] + sorted(results_df["category"].unique().tolist())
@@ -570,6 +574,7 @@ with tab1:
             "L2 Can Support": "\u2705 L2 Can Support",
             "L2 Cannot Support": "\u274c L2 Cannot Support",
             "Partially Supported": "\u26a0\ufe0f Partially Supported",
+            "Insufficient Data": "\u2753 Insufficient Data",
         }).fillna(styled_page.get("decision", ""))
 
         selection = st.dataframe(
@@ -636,6 +641,8 @@ with tab1:
                     st.success(f"**{decision}**")
                 elif decision == "L2 Cannot Support":
                     st.error(f"**{decision}**")
+                elif decision == "Insufficient Data":
+                    st.caption(f"**{decision}**")
                 else:
                     st.warning(f"**{decision}**")
 
