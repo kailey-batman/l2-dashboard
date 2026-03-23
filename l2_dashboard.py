@@ -82,6 +82,11 @@ Also classify the ticket into the single most relevant category from this list:
 
 Also identify the support person who was handling customer communication for this ticket. Look for names of support agents, representatives, or team members in the Intercom transcript and description who were responding to or assisting the customer. This is the internal support person, NOT the customer. If you cannot identify a specific support person, use "Unknown".
 
+Our L2 engineers are Sean and Jayson. Check if either of them appears in the ticket data (description, transcript, shortcut details, etc.) and determine their involvement:
+- "Responsible" = they owned and delivered the fix
+- "Assisted" = they helped but someone else delivered the fix
+- "None" = no evidence of their involvement
+
 Also rate your confidence in this decision from 1 to 5:
 - 1 = Very uncertain, could easily go either way
 - 2 = Somewhat uncertain, limited information
@@ -94,6 +99,8 @@ Respond with ONLY valid JSON in this exact format (no markdown, no code fences):
   "decision": "L2 Can Support" or "L2 Cannot Support" or "Partially Supported",
   "category": "one category from the list above",
   "support_person": "Name of the support person handling the ticket, or Unknown",
+  "l2_engineer": "Sean" or "Jayson" or "None",
+  "l2_involvement": "Responsible" or "Assisted" or "None",
   "confidence": 1-5,
   "explanation": "A concise 2-3 sentence explanation of why L2 can or cannot handle this ticket, referencing specific L2 capabilities or gaps."
 }}
@@ -185,7 +192,7 @@ def evaluate_ticket(client, name, description, transcript):
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        return {"decision": "Error", "category": "Other", "support_person": "Unknown", "confidence": 0, "explanation": f"Parse error: {text[:200]}"}
+        return {"decision": "Error", "category": "Other", "support_person": "Unknown", "l2_engineer": "None", "l2_involvement": "None", "confidence": 0, "explanation": f"Parse error: {text[:200]}"}
 
 
 def color_decision(val):
@@ -209,6 +216,10 @@ def load_results():
             df["confidence"] = 0
         if "support_person" not in df.columns:
             df["support_person"] = "Unknown"
+        if "l2_engineer" not in df.columns:
+            df["l2_engineer"] = "None"
+        if "l2_involvement" not in df.columns:
+            df["l2_involvement"] = "None"
         return df
     return None
 
@@ -265,7 +276,7 @@ def load_history():
 
 
 # ── Page Config ─────────────────────────────────────────────────────────────
-st.set_page_config(page_title="L2 Capability Analyzer", page_icon="logo.svg", layout="wide")
+st.set_page_config(page_title="Escalation Tracker", page_icon="logo.svg", layout="wide")
 
 # ── Custom CSS ──────────────────────────────────────────────────────────────
 st.markdown("""
@@ -343,13 +354,13 @@ if os.path.exists(logo_path):
     st.markdown(f"""
     <div class="header-container">
         <img src="data:image/svg+xml;base64,{logo_b64}" />
-        <h1>L2 Capability Analyzer</h1>
+        <h1>Escalation Tracker</h1>
     </div>
     """, unsafe_allow_html=True)
 else:
-    st.title("L2 Capability Analyzer")
+    st.title("Escalation Tracker")
 
-st.markdown('<div class="header-subtitle">Evaluate whether L2 support can handle each ticket using Claude AI.</div>', unsafe_allow_html=True)
+st.markdown('<div class="header-subtitle">Engineering escalation tracking &amp; L2 capability analysis</div>', unsafe_allow_html=True)
 
 # ── Analysis progress banner (shows on all tabs) ───────────────────────────
 if "analysis_running" not in st.session_state:
@@ -400,6 +411,8 @@ with tab1:
 
     if results_df is not None and not results_df.empty:
         # ── Summary metrics ─────────────────────────────────────────────
+        # ── Summary metrics row 1: L2 capability ─────────────────────
+        st.markdown("**L2 Capability Assessment**")
         col1, col2, col3, col4, col5 = st.columns(5)
         total = len(results_df)
         supported = len(results_df[results_df["decision"] == "L2 Can Support"])
@@ -407,11 +420,35 @@ with tab1:
         partial = len(results_df[results_df["decision"] == "Partially Supported"])
         avg_conf = results_df["confidence"].mean() if "confidence" in results_df.columns else 0
 
-        col1.metric("Total Tickets", total)
+        col1.metric("Total Escalations", total)
         col2.metric("L2 Can Support", supported, delta=f"{supported/total*100:.0f}%")
         col3.metric("L2 Cannot Support", unsupported, delta=f"{unsupported/total*100:.0f}%", delta_color="inverse")
         col4.metric("Partially Supported", partial)
         col5.metric("Avg Confidence", f"{avg_conf:.1f}/5")
+
+        # ── Summary metrics row 2: Actual L2 involvement ─────────────
+        st.markdown("**Actual L2 Engineer Involvement**")
+        l2_col1, l2_col2, l2_col3, l2_col4, l2_col5 = st.columns(5)
+
+        l2_involved = results_df[results_df["l2_involvement"] != "None"]
+        l2_responsible = results_df[results_df["l2_involvement"] == "Responsible"]
+        l2_assisted = results_df[results_df["l2_involvement"] == "Assisted"]
+        sean_tickets = results_df[results_df["l2_engineer"] == "Sean"]
+        jayson_tickets = results_df[results_df["l2_engineer"] == "Jayson"]
+
+        l2_col1.metric("L2 Involved", len(l2_involved), delta=f"{len(l2_involved)/total*100:.0f}%" if total > 0 else "0%")
+        l2_col2.metric("L2 Responsible", len(l2_responsible))
+        l2_col3.metric("L2 Assisted", len(l2_assisted))
+        l2_col4.metric("Sean", len(sean_tickets))
+        l2_col5.metric("Jayson", len(jayson_tickets))
+
+        # ── Gap analysis ─────────────────────────────────────────────
+        could_but_didnt = len(results_df[
+            (results_df["decision"] == "L2 Can Support") &
+            (results_df["l2_involvement"] == "None")
+        ])
+        if could_but_didnt > 0:
+            st.info(f"**Gap:** {could_but_didnt} tickets L2 *could* have supported but had no L2 involvement")
 
         # ── Comparison with human labels ────────────────────────────────
         if "human_decision" in results_df.columns or overrides:
@@ -516,7 +553,7 @@ with tab1:
         page_df = filtered.iloc[start_idx:end_idx]
 
         # ── Clickable table ────────────────────────────────────────────
-        display_cols = ["name", "support_person", "category", "decision", "confidence"]
+        display_cols = ["name", "support_person", "category", "decision", "l2_engineer", "l2_involvement", "confidence"]
         available_cols = [c for c in display_cols if c in page_df.columns]
 
         # Color-code decisions with indicators
@@ -594,6 +631,16 @@ with tab1:
                 else:
                     st.warning(f"**{decision}**")
 
+                # L2 involvement badge
+                l2_eng = row.get("l2_engineer", "None")
+                l2_inv = row.get("l2_involvement", "None")
+                if l2_inv == "Responsible":
+                    st.success(f"**L2: {l2_eng}** — Responsible")
+                elif l2_inv == "Assisted":
+                    st.warning(f"**L2: {l2_eng}** — Assisted")
+                else:
+                    st.caption("No L2 involvement detected")
+
             with col_mid:
                 conf = int(row.get("confidence", 0))
                 stars = "★" * conf + "☆" * (5 - conf)
@@ -603,6 +650,37 @@ with tab1:
 
             with col_right:
                 st.markdown(f"**Explanation:** {row['explanation']}")
+
+            # ── Manual L2 involvement tagging ──────────────────────────
+            with st.expander("Tag L2 Involvement"):
+                tag_col1, tag_col2 = st.columns(2)
+                with tag_col1:
+                    tag_engineer = st.selectbox(
+                        "L2 Engineer:",
+                        ["None", "Sean", "Jayson"],
+                        index=["None", "Sean", "Jayson"].index(row.get("l2_engineer", "None")) if row.get("l2_engineer", "None") in ["None", "Sean", "Jayson"] else 0,
+                        key=f"tag_eng_{selected}",
+                    )
+                with tag_col2:
+                    tag_involvement = st.selectbox(
+                        "Involvement:",
+                        ["None", "Responsible", "Assisted"],
+                        index=["None", "Responsible", "Assisted"].index(row.get("l2_involvement", "None")) if row.get("l2_involvement", "None") in ["None", "Responsible", "Assisted"] else 0,
+                        key=f"tag_inv_{selected}",
+                    )
+                if st.button("Save L2 Tag", key=f"save_tag_{selected}"):
+                    # Update the results file directly
+                    with open(RESULTS_FILE) as f:
+                        all_results = json.load(f)
+                    for r in all_results:
+                        if r["name"] == selected:
+                            r["l2_engineer"] = tag_engineer
+                            r["l2_involvement"] = tag_involvement
+                            break
+                    with open(RESULTS_FILE, "w") as f:
+                        json.dump(all_results, f, indent=2)
+                    st.success(f"Saved: {tag_engineer} — {tag_involvement}")
+                    st.rerun()
 
             if "description" in row and row["description"]:
                 with st.expander("Full Description"):
@@ -758,6 +836,8 @@ with tab2:
                         "decision": result.get("decision", "Error"),
                         "category": result.get("category", "Other"),
                         "support_person": result.get("support_person", "Unknown"),
+                        "l2_engineer": result.get("l2_engineer", "None"),
+                        "l2_involvement": result.get("l2_involvement", "None"),
                         "confidence": result.get("confidence", 0),
                         "explanation": result.get("explanation", ""),
                     })
