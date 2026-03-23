@@ -91,10 +91,23 @@ Also classify the ticket into the single most relevant category from this list:
 
 Also identify the support person who was handling customer communication for this ticket. Look for names of support agents, representatives, or team members in the Intercom transcript and description who were responding to or assisting the customer. This is the internal support person, NOT the customer. If you cannot identify a specific support person, use "Unknown".
 
-Our L2 engineers are Sean and Jayson. Check if either of them appears in the ticket data (description, transcript, shortcut details, etc.) and determine their involvement:
-- "Responsible" = they owned and delivered the fix
-- "Assisted" = they helped but someone else delivered the fix
-- "None" = no evidence of their involvement
+Our L2 engineers are Sean and Jayson. Determine if either of them was involved in actually FIXING the issue — not just discussing it with the customer.
+
+IMPORTANT: Jayson also works as an L1 support rep, so him appearing in customer conversations (Intercom, Slack) does NOT count as L2 involvement. Only count Sean or Jayson as involved if there is evidence in the Shortcut Ticket Activity or technical comments that they:
+- Submitted or referenced a PR / code change / commit
+- Proposed a technical solution AND acted on it (not just discussed it)
+- Performed a data fix, configuration change, or deploy
+- Were assigned as the owner of the engineering fix
+
+Do NOT count as L2 involvement:
+- Customer-facing communication (Intercom replies, Slack messages to the customer)
+- Simply being mentioned or tagged in a ticket
+- Asking questions or gathering information without delivering a fix
+
+Based on this, determine their involvement:
+- "Responsible" = they owned and delivered the fix (PRs, commits, data fixes, deploys)
+- "Assisted" = they contributed technically to the fix but someone else delivered it
+- "None" = no evidence of technical fix involvement
 
 Also rate your confidence in this decision from 1 to 5:
 - 1 = Very uncertain, could easily go either way
