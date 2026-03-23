@@ -137,6 +137,8 @@ PROGRESS_FILE = os.path.join(APP_DIR, "analysis_progress.json")
 
 GOOGLE_SHEET_ID = "1dRC3DkwOKjhdZveTp2xuSC_roeoxWOUcoP-XWsKQkeo"
 GOOGLE_SHEET_TAB = "Tickets"
+RESULTS_SHEET_TAB = "Results"
+OVERRIDES_SHEET_TAB = "Overrides"
 GOOGLE_SHEET_EMBED_URL = f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEET_ID}/edit?gid=0&rm=minimal"
 
 # Service account credentials - check for file or Streamlit secrets
@@ -146,8 +148,8 @@ SERVICE_ACCOUNT_FILE = os.path.join(APP_DIR, "service_account.json")
 def get_gspread_client():
     """Get authenticated gspread client."""
     scopes = [
-        "https://www.googleapis.com/auth/spreadsheets.readonly",
-        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
     ]
     # Try env var first (for Railway), then Streamlit secrets, then local file
     creds = None
@@ -230,26 +232,102 @@ def color_decision(val):
     return ""
 
 
+RESULTS_COLUMNS = ["name", "description", "decision", "category", "support_person",
+                    "l2_engineer", "l2_involvement", "confidence", "explanation"]
+
+
+def _get_or_create_worksheet(tab_name, headers=None):
+    """Get a worksheet by name, creating it if it doesn't exist."""
+    try:
+        client = get_gspread_client()
+        if client is None:
+            return None, None
+        spreadsheet = client.open_by_key(GOOGLE_SHEET_ID)
+        try:
+            ws = spreadsheet.worksheet(tab_name)
+        except gspread.exceptions.WorksheetNotFound:
+            ws = spreadsheet.add_worksheet(title=tab_name, rows=1000, cols=20)
+            if headers:
+                ws.update("A1", [headers])
+        return spreadsheet, ws
+    except Exception:
+        return None, None
+
+
+def save_results_to_sheet(results):
+    """Write all results to the Results tab in Google Sheets."""
+    try:
+        _, ws = _get_or_create_worksheet(RESULTS_SHEET_TAB, headers=RESULTS_COLUMNS)
+        if ws is None:
+            # Fall back to local file
+            with open(RESULTS_FILE, "w") as f:
+                json.dump(results, f, indent=2)
+            return
+        # Clear existing data and write fresh
+        ws.clear()
+        rows = [RESULTS_COLUMNS]
+        for r in results:
+            rows.append([str(r.get(col, "")) for col in RESULTS_COLUMNS])
+        ws.update(f"A1:I{len(rows)}", rows)
+    except Exception:
+        # Fall back to local file
+        with open(RESULTS_FILE, "w") as f:
+            json.dump(results, f, indent=2)
+
+
+def load_results_from_sheet():
+    """Load results from the Results tab in Google Sheets."""
+    try:
+        _, ws = _get_or_create_worksheet(RESULTS_SHEET_TAB, headers=RESULTS_COLUMNS)
+        if ws is None:
+            return None
+        data = ws.get_all_records()
+        if not data:
+            return None
+        df = pd.DataFrame(data)
+        # Convert confidence to numeric
+        if "confidence" in df.columns:
+            df["confidence"] = pd.to_numeric(df["confidence"], errors="coerce").fillna(0).astype(int)
+        return df
+    except Exception:
+        return None
+
+
 def load_results():
+    """Load results from Google Sheet, falling back to local file."""
+    df = load_results_from_sheet()
+    if df is not None and not df.empty:
+        for col, default in [("category", "Other"), ("confidence", 0), ("support_person", "Unknown"),
+                              ("l2_engineer", "None"), ("l2_involvement", "None")]:
+            if col not in df.columns:
+                df[col] = default
+        return df
+    # Fallback to local file
     if os.path.exists(RESULTS_FILE):
         with open(RESULTS_FILE) as f:
             data = json.load(f)
         df = pd.DataFrame(data)
-        if "category" not in df.columns:
-            df["category"] = "Other"
-        if "confidence" not in df.columns:
-            df["confidence"] = 0
-        if "support_person" not in df.columns:
-            df["support_person"] = "Unknown"
-        if "l2_engineer" not in df.columns:
-            df["l2_engineer"] = "None"
-        if "l2_involvement" not in df.columns:
-            df["l2_involvement"] = "None"
+        for col, default in [("category", "Other"), ("confidence", 0), ("support_person", "Unknown"),
+                              ("l2_engineer", "None"), ("l2_involvement", "None")]:
+            if col not in df.columns:
+                df[col] = default
         return df
     return None
 
 
+OVERRIDES_COLUMNS = ["name", "corrected_decision", "reason", "timestamp", "original_decision"]
+
+
 def load_overrides():
+    """Load overrides from Google Sheet, falling back to local file."""
+    try:
+        _, ws = _get_or_create_worksheet(OVERRIDES_SHEET_TAB, headers=OVERRIDES_COLUMNS)
+        if ws is not None:
+            data = ws.get_all_records()
+            if data:
+                return {r["name"]: r for r in data}
+    except Exception:
+        pass
     if os.path.exists(OVERRIDES_FILE):
         with open(OVERRIDES_FILE) as f:
             return json.load(f)
@@ -257,8 +335,22 @@ def load_overrides():
 
 
 def save_overrides(overrides):
+    """Save overrides to Google Sheet and local file."""
+    # Local file as backup
     with open(OVERRIDES_FILE, "w") as f:
         json.dump(overrides, f, indent=2)
+    # Google Sheet
+    try:
+        _, ws = _get_or_create_worksheet(OVERRIDES_SHEET_TAB, headers=OVERRIDES_COLUMNS)
+        if ws is not None:
+            ws.clear()
+            rows = [OVERRIDES_COLUMNS]
+            for name, ov in overrides.items():
+                rows.append([name, ov.get("corrected_decision", ""), ov.get("reason", ""),
+                             ov.get("timestamp", ""), ov.get("original_decision", "")])
+            ws.update(f"A1:E{len(rows)}", rows)
+    except Exception:
+        pass
 
 
 def save_history_snapshot(results):
@@ -330,7 +422,7 @@ def clear_analysis_progress():
 
 
 def run_analysis_background(rows, existing_results, rerun_all):
-    """Run analysis in a background thread, writing progress and results to files."""
+    """Run analysis in a background thread, saving results to Google Sheets."""
     try:
         client = Anthropic()
         analyzed_names = {r["name"] for r in existing_results}
@@ -369,16 +461,20 @@ def run_analysis_background(rows, existing_results, rerun_all):
                 "explanation": result.get("explanation", ""),
             })
 
-            # Save results incrementally so they show up as they complete
-            all_results = base_results + new_results
-            with open(RESULTS_FILE, "w") as f:
-                json.dump(all_results, f, indent=2)
+            # Save incrementally every 5 tickets (and on last)
+            if (i + 1) % 5 == 0 or i == len(new_rows) - 1:
+                all_results = base_results + new_results
+                save_results_to_sheet(all_results)
+                # Also save local as backup
+                with open(RESULTS_FILE, "w") as f:
+                    json.dump(all_results, f, indent=2)
 
             if i < len(new_rows) - 1:
                 time.sleep(0.5)
 
         # Final save & snapshot
         all_results = base_results + new_results
+        save_results_to_sheet(all_results)
         with open(RESULTS_FILE, "w") as f:
             json.dump(all_results, f, indent=2)
         save_history_snapshot(all_results)
@@ -773,14 +869,17 @@ with tab1:
                         key=f"tag_inv_{selected}",
                     )
                 if st.button("Save L2 Tag", key=f"save_tag_{selected}"):
-                    # Update the results file directly
-                    with open(RESULTS_FILE) as f:
-                        all_results = json.load(f)
+                    # Load current results, update, and save to sheet + local
+                    all_results = []
+                    if os.path.exists(RESULTS_FILE):
+                        with open(RESULTS_FILE) as f:
+                            all_results = json.load(f)
                     for r in all_results:
                         if r["name"] == selected:
                             r["l2_engineer"] = tag_engineer
                             r["l2_involvement"] = tag_involvement
                             break
+                    save_results_to_sheet(all_results)
                     with open(RESULTS_FILE, "w") as f:
                         json.dump(all_results, f, indent=2)
                     st.success(f"Saved: {tag_engineer} — {tag_involvement}")
@@ -906,11 +1005,12 @@ with tab2:
                 if max_rows > 0:
                     rows = rows[:max_rows]
 
-                # Load existing results
+                # Load existing results from sheet (or local fallback)
                 existing_results = []
-                if not rerun_all and os.path.exists(RESULTS_FILE):
-                    with open(RESULTS_FILE) as f:
-                        existing_results = json.load(f)
+                if not rerun_all:
+                    df_existing = load_results()
+                    if df_existing is not None and not df_existing.empty:
+                        existing_results = df_existing.to_dict("records")
 
                 # Check how many are new
                 analyzed_names = {r["name"] for r in existing_results}
