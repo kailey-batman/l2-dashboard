@@ -3,3 +3,4 @@ __pycache__/
 .env
 .streamlit/secrets.toml
 service_account.json
+analysis_progress.json

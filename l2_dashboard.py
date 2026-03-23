@@ -14,6 +14,7 @@ from datetime import datetime
 from anthropic import Anthropic
 import gspread
 from google.oauth2.service_account import Credentials
+import threading
 
 # ── L2 Supported Capabilities ──────────────────────────────────────────────
 L2_CAPABILITIES = """
@@ -119,6 +120,7 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_FILE = os.path.join(APP_DIR, "l2_results.json")
 OVERRIDES_FILE = os.path.join(APP_DIR, "l2_overrides.json")
 HISTORY_DIR = os.path.join(APP_DIR, "history")
+PROGRESS_FILE = os.path.join(APP_DIR, "analysis_progress.json")
 
 GOOGLE_SHEET_ID = "1dRC3DkwOKjhdZveTp2xuSC_roeoxWOUcoP-XWsKQkeo"
 GOOGLE_SHEET_TAB = "Tickets"
@@ -285,6 +287,94 @@ def load_history():
     return snapshots
 
 
+def get_analysis_progress():
+    """Read the current analysis progress from file."""
+    if os.path.exists(PROGRESS_FILE):
+        try:
+            with open(PROGRESS_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return None
+    return None
+
+
+def set_analysis_progress(current, total, name, status="running"):
+    """Write analysis progress to file."""
+    with open(PROGRESS_FILE, "w") as f:
+        json.dump({
+            "status": status,
+            "current": current,
+            "total": total,
+            "ticket_name": name,
+            "updated_at": datetime.now().isoformat(),
+        }, f)
+
+
+def clear_analysis_progress():
+    """Remove the progress file when done."""
+    if os.path.exists(PROGRESS_FILE):
+        os.remove(PROGRESS_FILE)
+
+
+def run_analysis_background(rows, existing_results, rerun_all):
+    """Run analysis in a background thread, writing progress and results to files."""
+    try:
+        client = Anthropic()
+        analyzed_names = {r["name"] for r in existing_results}
+
+        if rerun_all:
+            new_rows = rows
+            base_results = []
+        else:
+            new_rows = [r for r in rows if r.get("name", "").strip() not in analyzed_names]
+            base_results = list(existing_results)
+
+        if not new_rows:
+            set_analysis_progress(0, 0, "", status="complete")
+            return
+
+        new_results = []
+        for i, row in enumerate(new_rows):
+            name = row.get("name", "").strip()
+            desc = row.get("description", "").strip()
+            intercom_transcript = row.get("Intercom Transcript", "").strip()
+            slack_transcript = row.get("Slack Conversation Transcript", "").strip()
+            shortcut_activity = row.get("Shortcut Ticket Activity", "").strip()
+
+            set_analysis_progress(i + 1, len(new_rows), name)
+
+            result = evaluate_ticket(client, name, desc, intercom_transcript, slack_transcript, shortcut_activity)
+            new_results.append({
+                "name": name,
+                "description": desc[:200],
+                "decision": result.get("decision", "Error"),
+                "category": result.get("category", "Other"),
+                "support_person": result.get("support_person", "Unknown"),
+                "l2_engineer": result.get("l2_engineer", "None"),
+                "l2_involvement": result.get("l2_involvement", "None"),
+                "confidence": result.get("confidence", 0),
+                "explanation": result.get("explanation", ""),
+            })
+
+            # Save results incrementally so they show up as they complete
+            all_results = base_results + new_results
+            with open(RESULTS_FILE, "w") as f:
+                json.dump(all_results, f, indent=2)
+
+            if i < len(new_rows) - 1:
+                time.sleep(0.5)
+
+        # Final save & snapshot
+        all_results = base_results + new_results
+        with open(RESULTS_FILE, "w") as f:
+            json.dump(all_results, f, indent=2)
+        save_history_snapshot(all_results)
+
+        set_analysis_progress(len(new_rows), len(new_rows), "", status="complete")
+    except Exception as e:
+        set_analysis_progress(0, 0, str(e), status="error")
+
+
 # ── Page Config ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Escalation Tracker", page_icon="logo.svg", layout="wide")
 
@@ -372,21 +462,27 @@ else:
 
 st.markdown('<div class="header-subtitle">Engineering escalation tracking &amp; L2 capability analysis</div>', unsafe_allow_html=True)
 
-# ── Analysis progress banner (shows on all tabs) ───────────────────────────
-if "analysis_running" not in st.session_state:
-    st.session_state.analysis_running = False
-if "analysis_progress" not in st.session_state:
-    st.session_state.analysis_progress = 0.0
-if "analysis_status" not in st.session_state:
-    st.session_state.analysis_status = ""
+# ── Analysis progress banner (file-based, survives refresh) ────────────────
+analysis_progress = get_analysis_progress()
+if analysis_progress and analysis_progress.get("status") == "running":
+    prog_current = analysis_progress.get("current", 0)
+    prog_total = analysis_progress.get("total", 1)
+    prog_name = analysis_progress.get("ticket_name", "")
+    prog_pct = prog_current / prog_total if prog_total > 0 else 0
 
-if st.session_state.analysis_running:
     st.markdown(f"""
     <div class="progress-banner">
-        <span class="progress-text">Analysis in progress: {st.session_state.analysis_status}</span>
+        <span class="progress-text">Analysis in progress: [{prog_current}/{prog_total}] {prog_name[:60]}</span>
     </div>
     """, unsafe_allow_html=True)
-    st.progress(st.session_state.analysis_progress)
+    st.progress(prog_pct)
+    # Auto-refresh every 3 seconds to update progress
+    st.markdown("""<meta http-equiv="refresh" content="3">""", unsafe_allow_html=True)
+elif analysis_progress and analysis_progress.get("status") == "complete":
+    prog_total = analysis_progress.get("total", 0)
+    if prog_total > 0:
+        st.success(f"Analysis complete: {prog_total} tickets processed.")
+    clear_analysis_progress()
 
 # ── Sidebar ─────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -743,122 +839,87 @@ with tab1:
 with tab2:
     st.subheader("Run New Analysis")
 
-    max_rows = st.number_input("Max rows to process (0 = all)", min_value=0, value=10, step=5)
+    # Check if analysis is already running
+    current_progress = get_analysis_progress()
+    is_running = current_progress and current_progress.get("status") == "running"
 
-    rerun_all = st.checkbox("Re-analyze all tickets (ignore previous results)", value=False)
+    if is_running:
+        prog = current_progress
+        st.warning(f"Analysis is already running: [{prog['current']}/{prog['total']}] {prog['ticket_name'][:60]}")
+        st.progress(prog["current"] / prog["total"] if prog["total"] > 0 else 0)
+        if st.button("Cancel Analysis"):
+            clear_analysis_progress()
+            st.rerun()
+    else:
+        max_rows = st.number_input("Max rows to process (0 = all)", min_value=0, value=10, step=5)
 
-    data_source = st.radio(
-        "Data source:",
-        ["Google Sheet (live in railway)", "Upload CSV"],
-        horizontal=True,
-    )
+        rerun_all = st.checkbox("Re-analyze all tickets (ignore previous results)", value=False)
 
-    uploaded = None
-    if data_source == "Upload CSV":
-        uploaded = st.file_uploader("Upload a CSV file with ticket data", type=["csv"])
+        data_source = st.radio(
+            "Data source:",
+            ["Google Sheet (live in railway)", "Upload CSV"],
+            horizontal=True,
+        )
 
-    if data_source == "Google Sheet (live in railway)":
-        sheet_df = load_google_sheet()
-        if sheet_df is not None:
-            st.success(f"Connected to Google Sheet: **{len(sheet_df)} rows** found")
-            with st.expander("Preview sheet data"):
-                st.dataframe(sheet_df.head(5), use_container_width=True)
-        else:
-            st.error("Could not connect to Google Sheet. Make sure the sheet is shared as 'Anyone with the link can view'.")
+        uploaded = None
+        if data_source == "Upload CSV":
+            uploaded = st.file_uploader("Upload a CSV file with ticket data", type=["csv"])
 
-    if st.button("Run Analysis", type="primary"):
-        rows = []
         if data_source == "Google Sheet (live in railway)":
             sheet_df = load_google_sheet()
             if sheet_df is not None:
-                rows = sheet_df.to_dict("records")
+                st.success(f"Connected to Google Sheet: **{len(sheet_df)} rows** found")
+                with st.expander("Preview sheet data"):
+                    st.dataframe(sheet_df.head(5), use_container_width=True)
             else:
-                st.error("Could not load Google Sheet.")
-        elif uploaded:
-            raw = uploaded.read().decode("utf-8-sig")
-            reader = csv.DictReader(raw.splitlines())
-            rows = list(reader)
-        else:
-            st.error("No file provided.")
+                st.error("Could not connect to Google Sheet. Make sure the sheet is shared with the service account.")
 
-        if rows:
-            # Load existing results and find already-analyzed ticket names
-            existing_results = []
-            if not rerun_all and os.path.exists(RESULTS_FILE):
-                with open(RESULTS_FILE) as f:
-                    existing_results = json.load(f)
-            analyzed_names = {r["name"] for r in existing_results}
-
-            # Filter to only new/unanalyzed rows (or all if rerunning)
-            if rerun_all:
-                new_rows = rows
-                existing_results = []  # Clear old results on full rerun
+        if st.button("Run Analysis", type="primary"):
+            rows = []
+            if data_source == "Google Sheet (live in railway)":
+                sheet_df = load_google_sheet()
+                if sheet_df is not None:
+                    rows = sheet_df.to_dict("records")
+                else:
+                    st.error("Could not load Google Sheet.")
+            elif uploaded:
+                raw = uploaded.read().decode("utf-8-sig")
+                reader = csv.DictReader(raw.splitlines())
+                rows = list(reader)
             else:
-                new_rows = [r for r in rows if r.get("name", "").strip() not in analyzed_names]
+                st.error("No file provided.")
 
-            if max_rows > 0:
-                new_rows = new_rows[:max_rows]
+            if rows:
+                if max_rows > 0:
+                    rows = rows[:max_rows]
 
-            if not new_rows:
-                st.info(f"All {len(rows)} tickets have already been analyzed. No new rows to process.")
-            else:
-                st.markdown(f"**{len(new_rows)} new tickets** to analyze ({len(analyzed_names)} already done)")
+                # Load existing results
+                existing_results = []
+                if not rerun_all and os.path.exists(RESULTS_FILE):
+                    with open(RESULTS_FILE) as f:
+                        existing_results = json.load(f)
 
-                client = Anthropic()
-                new_results = []
+                # Check how many are new
+                analyzed_names = {r["name"] for r in existing_results}
+                if rerun_all:
+                    new_count = len(rows)
+                else:
+                    new_count = sum(1 for r in rows if r.get("name", "").strip() not in analyzed_names)
 
-                st.session_state.analysis_running = True
-                progress_bar = st.progress(0, text="Starting analysis...")
-                status_text = st.empty()
-
-                for i, row in enumerate(new_rows):
-                    name = row.get("name", "").strip()
-                    desc = row.get("description", "").strip()
-                    intercom_transcript = row.get("Intercom Transcript", "").strip()
-                    slack_transcript = row.get("Slack Conversation Transcript", "").strip()
-                    shortcut_activity = row.get("Shortcut Ticket Activity", "").strip()
-
-                    pct = i / len(new_rows)
-                    status = f"[{i+1}/{len(new_rows)}] {name[:60]}..."
-                    progress_bar.progress(pct, text=status)
-                    status_text.markdown(f"**Evaluating:** {name[:80]}")
-
-                    st.session_state.analysis_progress = pct
-                    st.session_state.analysis_status = status
-
-                    result = evaluate_ticket(client, name, desc, intercom_transcript, slack_transcript, shortcut_activity)
-                    new_results.append({
-                        "name": name,
-                        "description": desc[:200],
-                        "decision": result.get("decision", "Error"),
-                        "category": result.get("category", "Other"),
-                        "support_person": result.get("support_person", "Unknown"),
-                        "l2_engineer": result.get("l2_engineer", "None"),
-                        "l2_involvement": result.get("l2_involvement", "None"),
-                        "confidence": result.get("confidence", 0),
-                        "explanation": result.get("explanation", ""),
-                    })
-
-                    if i < len(new_rows) - 1:
-                        time.sleep(0.5)
-
-                progress_bar.progress(1.0, text="Complete!")
-                status_text.empty()
-
-                st.session_state.analysis_running = False
-                st.session_state.analysis_progress = 0.0
-                st.session_state.analysis_status = ""
-
-                # Merge new results with existing
-                all_results = existing_results + new_results
-                with open(RESULTS_FILE, "w") as f:
-                    json.dump(all_results, f, indent=2)
-
-                # Save history snapshot
-                save_history_snapshot(all_results)
-
-                st.success(f"Analyzed {len(new_results)} new tickets. Total: {len(all_results)}. Switch to **Results** tab to explore.")
-                st.rerun()
+                if new_count == 0 and not rerun_all:
+                    st.info("All tickets have already been analyzed. Check 'Re-analyze all' to rerun.")
+                else:
+                    # Launch background thread
+                    set_analysis_progress(0, new_count, "Starting...", status="running")
+                    thread = threading.Thread(
+                        target=run_analysis_background,
+                        args=(rows, existing_results, rerun_all),
+                        daemon=True,
+                    )
+                    thread.start()
+                    st.success(f"Analysis started in background: {new_count} tickets to process. You can refresh or switch tabs — progress is shown at the top of the page.")
+                    time.sleep(1)
+                    st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
