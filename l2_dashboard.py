@@ -281,7 +281,7 @@ st.set_page_config(page_title="Escalation Tracker", page_icon="logo.svg", layout
 # ── Custom CSS ──────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    .stApp { background-color: #0E1117; }
+    .stApp { background-color: #1E2229; }
     .header-container {
         display: flex; align-items: center; gap: 16px; padding: 0.5rem 0 1.5rem 0;
     }
@@ -290,37 +290,37 @@ st.markdown("""
     .header-subtitle { color: #9E9E9E; font-size: 0.95rem; margin-top: -8px; padding-bottom: 1rem; }
 
     [data-testid="stMetric"] {
-        background-color: #1A1F2B; border: 1px solid #2A2F3B; border-radius: 10px; padding: 16px;
+        background-color: #282D36; border: 1px solid #363C47; border-radius: 10px; padding: 16px;
     }
     [data-testid="stMetricLabel"] { color: #9E9E9E !important; }
     [data-testid="stMetricValue"] { color: #E0E0E0 !important; }
     [data-testid="stMetricDelta"] { color: #00E676 !important; }
 
-    [data-testid="stSidebar"] { background-color: #141820; border-right: 1px solid #2A2F3B; }
+    [data-testid="stSidebar"] { background-color: #232830; border-right: 1px solid #363C47; }
     [data-testid="stSidebar"] .stMarkdown h2 { color: #00E676; }
 
     .stTabs [data-baseweb="tab"] { color: #9E9E9E; }
     .stTabs [aria-selected="true"] { color: #00E676 !important; border-bottom-color: #00E676 !important; }
 
     .stButton > button[kind="primary"] {
-        background-color: #00E676; color: #0E1117; border: none; font-weight: 600;
+        background-color: #00E676; color: #1E2229; border: none; font-weight: 600;
     }
-    .stButton > button[kind="primary"]:hover { background-color: #00C853; color: #0E1117; }
+    .stButton > button[kind="primary"]:hover { background-color: #00C853; color: #1E2229; }
 
     .stDownloadButton > button {
-        background-color: #1A1F2B; color: #00E676; border: 1px solid #00E676;
+        background-color: #282D36; color: #00E676; border: 1px solid #00E676;
     }
-    .stDownloadButton > button:hover { background-color: #00E676; color: #0E1117; }
+    .stDownloadButton > button:hover { background-color: #00E676; color: #1E2229; }
 
-    .streamlit-expanderHeader { color: #E0E0E0; background-color: #1A1F2B; }
-    hr { border-color: #2A2F3B; }
-    [data-baseweb="select"] { background-color: #1A1F2B; }
-    .stDataFrame { border: 1px solid #2A2F3B; border-radius: 8px; overflow-x: auto !important; }
+    .streamlit-expanderHeader { color: #E0E0E0; background-color: #282D36; }
+    hr { border-color: #363C47; }
+    [data-baseweb="select"] { background-color: #282D36; }
+    .stDataFrame { border: 1px solid #363C47; border-radius: 8px; overflow-x: auto !important; }
     .stDataFrame [data-testid="stDataFrameResizable"] { width: 100% !important; min-width: 0 !important; }
 
     /* Category stats cards */
     .cat-stat-card {
-        background-color: #1A1F2B; border: 1px solid #2A2F3B; border-radius: 8px;
+        background-color: #282D36; border: 1px solid #363C47; border-radius: 8px;
         padding: 12px 16px; margin-bottom: 8px;
     }
     .cat-stat-card .cat-name { color: #00E676; font-weight: 600; font-size: 0.9rem; }
@@ -335,13 +335,13 @@ st.markdown("""
 
     /* Override badge */
     .override-badge {
-        display: inline-block; background-color: #FFD740; color: #0E1117;
+        display: inline-block; background-color: #FFD740; color: #1E2229;
         font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 4px;
     }
 
     /* Confidence stars */
     .confidence-stars { color: #00E676; letter-spacing: 2px; }
-    .confidence-dim { color: #2A2F3B; }
+    .confidence-dim { color: #363C47; }
 </style>
 """, unsafe_allow_html=True)
 
