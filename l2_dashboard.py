@@ -1044,7 +1044,7 @@ with tab3:
 
         # ── Category Summary Stats (full view, not collapsed) ─────────
         st.subheader("Category Summary")
-        for cat in sorted(valid_df["category"].unique()):
+        for cat in sorted([str(c) for c in valid_df["category"].dropna().unique()]):
             cat_df = valid_df[valid_df["category"] == cat]
             cat_total = len(cat_df)
             cat_supported = len(cat_df[cat_df["decision"] == "L2 Can Support"])
@@ -1087,7 +1087,7 @@ with tab3:
                 st.markdown(f"- **Needs review:** {low_conf} tickets with low confidence (1-2) should be manually reviewed")
 
             # Categories where L2 could help more
-            for cat in valid_df["category"].unique():
+            for cat in [str(c) for c in valid_df["category"].dropna().unique()]:
                 cat_df = valid_df[valid_df["category"] == cat]
                 could = len(cat_df[cat_df["decision"] == "L2 Can Support"])
                 did = len(cat_df[cat_df["l2_involvement"] != "None"])
