@@ -842,7 +842,10 @@ with tab1:
                     st.caption("No L2 involvement detected")
 
             with col_mid:
-                conf = int(row.get("confidence", 0))
+                try:
+                    conf = int(float(row.get("confidence", 0) or 0))
+                except (ValueError, TypeError):
+                    conf = 0
                 stars = "★" * conf + "☆" * (5 - conf)
                 st.markdown(f"**Confidence:** <span class='confidence-stars'>{stars}</span> ({conf}/5)", unsafe_allow_html=True)
                 st.markdown(f"**Category:** {row.get('category', 'Other')}")
