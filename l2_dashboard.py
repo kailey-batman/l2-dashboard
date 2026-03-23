@@ -112,8 +112,8 @@ RESULTS_FILE = os.path.join(APP_DIR, "l2_results.json")
 OVERRIDES_FILE = os.path.join(APP_DIR, "l2_overrides.json")
 HISTORY_DIR = os.path.join(APP_DIR, "history")
 
-GOOGLE_SHEET_ID = "1geFofNfnQb0Y2io7Nsk0-FtHwYPmSr9OswL5_fwdgm8"
-GOOGLE_SHEET_TAB = "Live in Railway"
+GOOGLE_SHEET_ID = "1dRC3DkwOKjhdZveTp2xuSC_roeoxWOUcoP-XWsKQkeo"
+GOOGLE_SHEET_TAB = "Tickets"
 GOOGLE_SHEET_EMBED_URL = f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEET_ID}/edit?gid=0&rm=minimal"
 
 # Service account credentials - check for file or Streamlit secrets
