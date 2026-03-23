@@ -475,26 +475,6 @@ with tab1:
 
         st.divider()
 
-        # ── Category summary stats ──────────────────────────────────────
-        with st.expander("Category Summary Stats"):
-            for cat in sorted(results_df["category"].unique()):
-                cat_df = results_df[results_df["category"] == cat]
-                cat_total = len(cat_df)
-                cat_supported = len(cat_df[cat_df["decision"] == "L2 Can Support"])
-                cat_unsupported = len(cat_df[cat_df["decision"] == "L2 Cannot Support"])
-                cat_partial = len(cat_df[cat_df["decision"] == "Partially Supported"])
-                cat_avg_conf = cat_df["confidence"].mean() if "confidence" in cat_df.columns else 0
-                st.markdown(f"""
-                <div class="cat-stat-card">
-                    <div class="cat-name">{cat} ({cat_total} tickets)</div>
-                    <div class="cat-detail">
-                        Can Support: {cat_supported} | Cannot Support: {cat_unsupported} | Partial: {cat_partial} | Avg Confidence: {cat_avg_conf:.1f}/5
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-        st.divider()
-
         # ── Search, Filters & Sort (collapsed by default) ──────────────
         search_query = ""
         filter_option = "All"
@@ -885,14 +865,25 @@ with tab2:
 # TAB 3: TRENDS
 # ═══════════════════════════════════════════════════════════════════════════
 with tab3:
-    st.subheader("Trends & Charts")
+    st.subheader("Trends & Insights")
 
     trends_df = load_results()
     if trends_df is not None and not trends_df.empty:
         if "category" not in trends_df.columns:
             trends_df["category"] = "Other"
+        if "l2_engineer" not in trends_df.columns:
+            trends_df["l2_engineer"] = "None"
+        if "l2_involvement" not in trends_df.columns:
+            trends_df["l2_involvement"] = "None"
+        if "confidence" not in trends_df.columns:
+            trends_df["confidence"] = 0
+        if "support_person" not in trends_df.columns:
+            trends_df["support_person"] = "Unknown"
 
-        # ── Current snapshot charts ─────────────────────────────────
+        # Exclude insufficient data for most charts
+        valid_df = trends_df[trends_df["decision"] != "Insufficient Data"]
+
+        # ── Row 1: Decision & Category charts ─────────────────────────
         chart_col1, chart_col2 = st.columns(2)
 
         with chart_col1:
@@ -906,7 +897,7 @@ with tab3:
 
         with chart_col2:
             st.markdown("**Category Breakdown**")
-            cat_counts = trends_df["category"].value_counts()
+            cat_counts = valid_df["category"].value_counts()
             chart_data2 = pd.DataFrame({
                 "Category": cat_counts.index,
                 "Count": cat_counts.values
@@ -915,7 +906,123 @@ with tab3:
 
         st.divider()
 
-        # ── Historical trends ───────────────────────────────────────
+        # ── Row 2: L2 Engineer & Support Person charts ────────────────
+        chart_col3, chart_col4 = st.columns(2)
+
+        with chart_col3:
+            st.markdown("**L2 Engineer Workload**")
+            l2_active = valid_df[valid_df["l2_engineer"] != "None"]
+            if not l2_active.empty:
+                eng_counts = l2_active["l2_engineer"].value_counts()
+                eng_data = pd.DataFrame({
+                    "Engineer": eng_counts.index,
+                    "Tickets": eng_counts.values
+                })
+                st.bar_chart(eng_data, x="Engineer", y="Tickets", color="#00E676")
+
+                # Breakdown by involvement type
+                eng_inv = l2_active.groupby(["l2_engineer", "l2_involvement"]).size().reset_index(name="count")
+                st.dataframe(eng_inv, use_container_width=True, hide_index=True)
+            else:
+                st.caption("No L2 engineer involvement data yet.")
+
+        with chart_col4:
+            st.markdown("**Top Support Persons (by ticket count)**")
+            sp_counts = valid_df[valid_df["support_person"] != "Unknown"]["support_person"].value_counts().head(10)
+            if not sp_counts.empty:
+                sp_data = pd.DataFrame({
+                    "Support Person": sp_counts.index,
+                    "Tickets": sp_counts.values
+                })
+                st.bar_chart(sp_data, x="Support Person", y="Tickets", color="#00E676")
+            else:
+                st.caption("No support person data yet.")
+
+        st.divider()
+
+        # ── Row 3: Capability vs Actual & Confidence ──────────────────
+        chart_col5, chart_col6 = st.columns(2)
+
+        with chart_col5:
+            st.markdown("**L2 Potential vs Actual**")
+            could_support = len(valid_df[valid_df["decision"] == "L2 Can Support"])
+            actually_handled = len(valid_df[valid_df["l2_involvement"] != "None"])
+            gap_data = pd.DataFrame({
+                "Metric": ["Could Support", "Actually Handled", "Gap"],
+                "Count": [could_support, actually_handled, max(0, could_support - actually_handled)]
+            })
+            st.bar_chart(gap_data, x="Metric", y="Count", color="#00E676")
+
+        with chart_col6:
+            st.markdown("**Confidence Distribution**")
+            conf_valid = valid_df[valid_df["confidence"] > 0]
+            if not conf_valid.empty:
+                conf_counts = conf_valid["confidence"].value_counts().sort_index()
+                conf_data = pd.DataFrame({
+                    "Confidence": conf_counts.index.astype(str),
+                    "Count": conf_counts.values
+                })
+                st.bar_chart(conf_data, x="Confidence", y="Count", color="#00E676")
+            else:
+                st.caption("No confidence data yet.")
+
+        st.divider()
+
+        # ── Category Summary Stats (full view, not collapsed) ─────────
+        st.subheader("Category Summary")
+        for cat in sorted(valid_df["category"].unique()):
+            cat_df = valid_df[valid_df["category"] == cat]
+            cat_total = len(cat_df)
+            cat_supported = len(cat_df[cat_df["decision"] == "L2 Can Support"])
+            cat_unsupported = len(cat_df[cat_df["decision"] == "L2 Cannot Support"])
+            cat_partial = len(cat_df[cat_df["decision"] == "Partially Supported"])
+            cat_l2_handled = len(cat_df[cat_df["l2_involvement"] != "None"])
+            cat_avg_conf = cat_df["confidence"].mean() if not cat_df.empty else 0
+            st.markdown(f"""
+            <div class="cat-stat-card">
+                <div class="cat-name">{cat} ({cat_total} tickets)</div>
+                <div class="cat-detail">
+                    Can Support: {cat_supported} | Cannot Support: {cat_unsupported} | Partial: {cat_partial} | L2 Handled: {cat_l2_handled} | Avg Confidence: {cat_avg_conf:.1f}/5
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.divider()
+
+        # ── Key Insights ──────────────────────────────────────────────
+        st.subheader("Key Insights")
+
+        total_valid = len(valid_df)
+        if total_valid > 0:
+            # Most common category
+            top_cat = valid_df["category"].value_counts().index[0]
+            top_cat_count = valid_df["category"].value_counts().values[0]
+            st.markdown(f"- **Most common category:** {top_cat} ({top_cat_count} tickets, {top_cat_count/total_valid*100:.0f}%)")
+
+            # L2 coverage rate
+            l2_coverage = len(valid_df[valid_df["decision"] == "L2 Can Support"]) / total_valid * 100
+            st.markdown(f"- **L2 coverage potential:** {l2_coverage:.0f}% of tickets could be handled by L2")
+
+            # Actual L2 rate
+            actual_l2 = len(valid_df[valid_df["l2_involvement"] != "None"]) / total_valid * 100
+            st.markdown(f"- **Actual L2 handling rate:** {actual_l2:.0f}% of tickets had L2 involvement")
+
+            # Low confidence tickets needing review
+            low_conf = len(valid_df[valid_df["confidence"] <= 2])
+            if low_conf > 0:
+                st.markdown(f"- **Needs review:** {low_conf} tickets with low confidence (1-2) should be manually reviewed")
+
+            # Categories where L2 could help more
+            for cat in valid_df["category"].unique():
+                cat_df = valid_df[valid_df["category"] == cat]
+                could = len(cat_df[cat_df["decision"] == "L2 Can Support"])
+                did = len(cat_df[cat_df["l2_involvement"] != "None"])
+                if could > 3 and did == 0:
+                    st.markdown(f"- **Opportunity:** {cat} has {could} tickets L2 could support but no L2 involvement")
+
+        st.divider()
+
+        # ── Historical trends ─────────────────────────────────────────
         st.subheader("Historical Trends")
         st.markdown("Track how L2 coverage changes across analysis runs over time.")
 
