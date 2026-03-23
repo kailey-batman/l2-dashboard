@@ -602,7 +602,7 @@ with tab1:
                     ["All", "L2 Can Support", "L2 Cannot Support", "Partially Supported", "Insufficient Data"],
                 )
             with col_f2:
-                categories = ["All"] + sorted(results_df["category"].unique().tolist())
+                categories = ["All"] + sorted([str(c) for c in results_df["category"].dropna().unique().tolist()])
                 filter_category = st.selectbox("Filter by category:", categories)
             with col_f3:
                 confidence_filter = st.selectbox(
