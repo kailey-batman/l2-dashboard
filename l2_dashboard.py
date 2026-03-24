@@ -98,32 +98,7 @@ Identify the support person who was conversing with the customer in the Intercom
 Look for lines matching "--- Support (Name) ---" where Name is NOT "Your Guideian". That person is the support person. If multiple support people appear, pick the one who sent the most messages. Only use names from "--- Support (...) ---" lines — do NOT use names from "--- Customer (...) ---" lines (those are customers). If no real support person appears in the Intercom Transcript, use "Unknown".
 
 L2 ENGINEER INVOLVEMENT:
-Our L2 engineers are Sean and Jayson. You must determine if either performed concrete technical work to fix the issue.
-
-EXTREMELY STRICT CRITERIA — the bar is very high. Default is ALWAYS "None" unless you find undeniable proof.
-
-The ONLY evidence that counts is found in the **Shortcut Ticket Activity** section. Do NOT use Intercom Transcript or Slack Conversation to determine L2 involvement — those are customer/support communications.
-
-You MUST find at least one of these in the Shortcut Ticket Activity to credit Sean or Jayson:
-- A PR or commit they authored (look for "opened a pull request", "committed", GitHub links, branch names attributed to them)
-- A data fix they explicitly performed (e.g., "Sean ran the SQL to restore...", "Jayson executed the data migration...")
-- A configuration change or deploy they personally made (explicitly stated, not implied)
-
-These DO NOT count — even if Sean or Jayson did them:
-- Commenting on a ticket
-- Being assigned to a ticket
-- Asking or answering questions
-- Investigating or reproducing an issue
-- Communicating with customers (Intercom, Slack)
-- Triaging, updating status, or moving tickets
-- Being mentioned by someone else
-- Proposing a solution without implementing it
-
-If you cannot point to a specific PR, commit, data fix, or deploy BY NAME in the Shortcut Ticket Activity, return "None".
-
-- "Responsible" = they authored the PR/commit/fix that resolved the issue (explicit proof required)
-- "Assisted" = they authored a secondary technical contribution while someone else delivered the primary fix
-- "None" = anything else (THIS IS THE DEFAULT — use this unless proof is undeniable)
+Do NOT attempt to determine L2 engineer involvement from the ticket data. L2 involvement is tracked manually via a separate field. Always return "None" for both l2_engineer and l2_involvement.
 
 Also rate your confidence in this decision from 1 to 5:
 - 1 = Very uncertain, could easily go either way
@@ -466,6 +441,24 @@ def run_analysis_background(rows, existing_results, rerun_all):
 
             set_analysis_progress(i + 1, len(new_rows), name)
 
+            # Read L2 involvement from sheet tag (not from AI)
+            l2_tag = row.get("L2 Support Level", "").strip()
+            l2_engineer = "None"
+            l2_involvement = "None"
+            if l2_tag:
+                # Expected format: "Sean - Responsible", "Jayson - Assisted", etc.
+                tag_lower = l2_tag.lower()
+                if "sean" in tag_lower:
+                    l2_engineer = "Sean"
+                elif "jayson" in tag_lower:
+                    l2_engineer = "Jayson"
+                if "responsible" in tag_lower:
+                    l2_involvement = "Responsible"
+                elif "assisted" in tag_lower:
+                    l2_involvement = "Assisted"
+                elif l2_engineer != "None":
+                    l2_involvement = "Responsible"  # Default if engineer named but no level
+
             result = evaluate_ticket(client, name, desc, intercom_transcript, slack_transcript, shortcut_activity)
             new_results.append({
                 "name": name,
@@ -474,8 +467,8 @@ def run_analysis_background(rows, existing_results, rerun_all):
                 "decision": result.get("decision", "Error"),
                 "category": result.get("category", "Other"),
                 "support_person": result.get("support_person", "Unknown"),
-                "l2_engineer": result.get("l2_engineer", "None"),
-                "l2_involvement": result.get("l2_involvement", "None"),
+                "l2_engineer": l2_engineer,
+                "l2_involvement": l2_involvement,
                 "confidence": result.get("confidence", 0),
                 "explanation": result.get("explanation", ""),
             })
