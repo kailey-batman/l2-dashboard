@@ -650,21 +650,35 @@ with tab1:
             (results_df["l2_involvement"] == "None")
         ]
 
-        # ── Drill-down button style ──────────────────────────────────
+        # ── Metric card + drill-down style overrides ─────────────────
         st.markdown("""
         <style>
-            .drill-btn > button {
+            /* Metric label - size 20px bold */
+            [data-testid="stMetricLabel"] label, [data-testid="stMetricLabel"] p {
+                font-size: 14px !important;
+                font-weight: 700 !important;
+            }
+            /* Metric value - size 20px */
+            [data-testid="stMetricValue"] {
+                font-size: 20px !important;
+            }
+            /* Drill-down buttons: tiny, inside the card visually */
+            [data-testid="stMetric"] + div > .stButton > button,
+            .stButton > button[kind="secondary"] {
                 background-color: transparent !important;
                 border: none !important;
-                padding: 2px 0 0 0 !important;
+                box-shadow: none !important;
+                padding: 0 !important;
+                margin: -12px 0 0 0 !important;
                 min-height: 0 !important;
                 height: auto !important;
                 width: 100% !important;
                 color: #636b75 !important;
-                font-size: 0.65rem !important;
+                font-size: 8px !important;
                 text-align: left !important;
+                justify-content: flex-start !important;
             }
-            .drill-btn > button:hover {
+            .stButton > button[kind="secondary"]:hover {
                 color: #00E676 !important;
                 background-color: transparent !important;
             }
