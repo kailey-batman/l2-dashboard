@@ -653,34 +653,52 @@ with tab1:
         # ── Metric card + drill-down style overrides ─────────────────
         st.markdown("""
         <style>
-            /* Metric label - size 20px bold */
+            /* All metric cards same height */
+            [data-testid="stMetric"] {
+                min-height: 120px !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: space-between !important;
+                padding-bottom: 8px !important;
+            }
+            /* Metric label */
             [data-testid="stMetricLabel"] label, [data-testid="stMetricLabel"] p {
                 font-size: 14px !important;
                 font-weight: 700 !important;
             }
-            /* Metric value - size 20px */
+            /* Metric value */
             [data-testid="stMetricValue"] {
                 font-size: 20px !important;
             }
-            /* Drill-down buttons: tiny, inside the card visually */
-            [data-testid="stMetric"] + div > .stButton > button,
-            .stButton > button[kind="secondary"] {
-                background-color: transparent !important;
-                border: none !important;
-                box-shadow: none !important;
-                padding: 0 !important;
-                margin: -12px 0 0 0 !important;
-                min-height: 0 !important;
-                height: auto !important;
-                width: 100% !important;
-                color: #636b75 !important;
-                font-size: 8px !important;
-                text-align: left !important;
-                justify-content: flex-start !important;
-            }
-            .stButton > button[kind="secondary"]:hover {
-                color: #00E676 !important;
-                background-color: transparent !important;
+        </style>
+        """, unsafe_allow_html=True)
+
+        def metric_with_drill(label, value, key, filter_val, delta=None, delta_color="normal"):
+            """Render a metric card with drill-down inside it."""
+            delta_html = ""
+            if delta:
+                color = "#00E676" if delta_color == "normal" else "#ff5252"
+                delta_html = f'<div style="color:{color};font-size:12px;">↑ {delta}</div>'
+            st.markdown(f"""
+                <div style="background-color:#373E47; border:1px solid #444C56; border-radius:10px;
+                            padding:14px; min-height:120px; display:flex; flex-direction:column;
+                            justify-content:space-between; cursor:pointer;"
+                     id="card_{key}">
+                    <div style="color:#9E9E9E; font-size:16px; font-weight:700;">{label}</div>
+                    <div style="color:#E0E0E0; font-size:28px; font-weight:700;">{value}</div>
+                    {delta_html}
+                    <div style="color:#636b75; font-size:8px; margin-top:4px;">↓ drill down</div>
+                </div>
+            """, unsafe_allow_html=True)
+            return st.button("ㅤ", key=key, use_container_width=True)
+
+        # Hide the invisible trigger buttons
+        st.markdown("""
+        <style>
+            .hidden-btn > .stButton > button {
+                height: 0 !important; min-height: 0 !important; padding: 0 !important;
+                margin: -8px 0 0 0 !important; border: none !important; opacity: 0 !important;
+                overflow: hidden !important; font-size: 0 !important;
             }
         </style>
         """, unsafe_allow_html=True)
@@ -689,63 +707,61 @@ with tab1:
         st.markdown("**L2 Capability Assessment**")
         col1, col2, col3, col4, col5, col6 = st.columns(6)
 
-        active = st.session_state.metric_filter
-
         with col1:
-            st.metric("Total Escalations", total)
-            if st.button("↓ drill down", key="btn_total", use_container_width=True):
+            if metric_with_drill("Total Escalations", total, "btn_total", None):
                 st.session_state.metric_filter = None
                 st.rerun()
         with col2:
-            st.metric("L2 Can Support", supported, delta=f"{supported/total*100:.0f}%" if total > 0 else "0%")
-            if st.button("↓ drill down", key="btn_supported", use_container_width=True):
+            pct = f"{supported/total*100:.0f}%" if total > 0 else "0%"
+            if metric_with_drill("L2 Can Support", supported, "btn_supported", None, delta=pct):
                 st.session_state.metric_filter = ("decision", "L2 Can Support")
                 st.rerun()
         with col3:
-            st.metric("L2 Cannot Support", unsupported, delta=f"{unsupported/total*100:.0f}%" if total > 0 else "0%", delta_color="inverse")
-            if st.button("↓ drill down", key="btn_unsupported", use_container_width=True):
+            pct = f"{unsupported/total*100:.0f}%" if total > 0 else "0%"
+            if metric_with_drill("L2 Cannot Support", unsupported, "btn_unsupported", None, delta=pct, delta_color="inverse"):
                 st.session_state.metric_filter = ("decision", "L2 Cannot Support")
                 st.rerun()
         with col4:
-            st.metric("Partially Supported", partial)
-            if st.button("↓ drill down", key="btn_partial", use_container_width=True):
+            if metric_with_drill("Partially Supported", partial, "btn_partial", None):
                 st.session_state.metric_filter = ("decision", "Partially Supported")
                 st.rerun()
         with col5:
-            st.metric("Insufficient Data", insufficient)
-            if st.button("↓ drill down", key="btn_insufficient", use_container_width=True):
+            if metric_with_drill("Insufficient Data", insufficient, "btn_insufficient", None):
                 st.session_state.metric_filter = ("decision", "Insufficient Data")
                 st.rerun()
         with col6:
-            st.metric("Avg Confidence", f"{avg_conf:.1f}/5")
+            st.markdown(f"""
+                <div style="background-color:#373E47; border:1px solid #444C56; border-radius:10px;
+                            padding:14px; min-height:120px; display:flex; flex-direction:column;
+                            justify-content:space-between;">
+                    <div style="color:#9E9E9E; font-size:16px; font-weight:700;">Avg Confidence</div>
+                    <div style="color:#E0E0E0; font-size:28px; font-weight:700;">{avg_conf:.1f}/5</div>
+                </div>
+            """, unsafe_allow_html=True)
 
         # ── Row 2: Actual L2 involvement ──────────────────────────────
         st.markdown("**Actual L2 Engineer Involvement**")
         l2_col1, l2_col2, l2_col3, l2_col4, l2_col5 = st.columns(5)
 
         with l2_col1:
-            st.metric("L2 Involved", len(l2_involved), delta=f"{len(l2_involved)/total*100:.0f}%" if total > 0 else "0%")
-            if st.button("↓ drill down", key="btn_l2_involved", use_container_width=True):
+            pct = f"{len(l2_involved)/total*100:.0f}%" if total > 0 else "0%"
+            if metric_with_drill("L2 Involved", len(l2_involved), "btn_l2_involved", None, delta=pct):
                 st.session_state.metric_filter = ("l2_involvement", "!=None")
                 st.rerun()
         with l2_col2:
-            st.metric("L2 Responsible", len(l2_responsible))
-            if st.button("↓ drill down", key="btn_l2_responsible", use_container_width=True):
+            if metric_with_drill("L2 Responsible", len(l2_responsible), "btn_l2_responsible", None):
                 st.session_state.metric_filter = ("l2_involvement", "Responsible")
                 st.rerun()
         with l2_col3:
-            st.metric("L2 Assisted", len(l2_assisted))
-            if st.button("↓ drill down", key="btn_l2_assisted", use_container_width=True):
+            if metric_with_drill("L2 Assisted", len(l2_assisted), "btn_l2_assisted", None):
                 st.session_state.metric_filter = ("l2_involvement", "Assisted")
                 st.rerun()
         with l2_col4:
-            st.metric("Sean", len(sean_tickets))
-            if st.button("↓ drill down", key="btn_sean", use_container_width=True):
+            if metric_with_drill("Sean", len(sean_tickets), "btn_sean", None):
                 st.session_state.metric_filter = ("l2_engineer", "Sean")
                 st.rerun()
         with l2_col5:
-            st.metric("Jayson", len(jayson_tickets))
-            if st.button("↓ drill down", key="btn_jayson", use_container_width=True):
+            if metric_with_drill("Jayson", len(jayson_tickets), "btn_jayson", None):
                 st.session_state.metric_filter = ("l2_engineer", "Jayson")
                 st.rerun()
 
