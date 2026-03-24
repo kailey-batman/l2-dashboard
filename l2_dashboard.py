@@ -686,12 +686,18 @@ with tab1:
             parts.append('</div>')
             return "".join(parts)
 
-        # Hide trigger buttons completely
+        # Style trigger buttons to overlay the card
         st.markdown("""<style>
             div[data-testid="stButton"] button[kind="secondary"] {
-                height:0 !important;min-height:0 !important;padding:0 !important;
-                margin:-6px 0 0 0 !important;border:none !important;opacity:0 !important;
-                overflow:hidden !important;
+                position:relative !important;
+                margin-top:-130px !important;
+                height:130px !important;
+                min-height:130px !important;
+                width:100% !important;
+                opacity:0 !important;
+                cursor:pointer !important;
+                border:none !important;
+                padding:0 !important;
             }
         </style>""", unsafe_allow_html=True)
 
