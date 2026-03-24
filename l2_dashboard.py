@@ -889,15 +889,13 @@ with tab1:
         display_cols = ["name", "support_person", "category", "decision", "l2_engineer", "l2_involvement", "confidence"]
         available_cols = [c for c in display_cols if c in page_df.columns]
 
-        # Build display table with shortcut links in name column
+        # Build display table
         styled_page = page_df[available_cols].copy()
 
-        # Put shortcut URL into name column for LinkColumn rendering
-        if "shortcut_url" in page_df.columns:
-            styled_page["name"] = page_df.apply(
-                lambda r: r["shortcut_url"] if str(r.get("shortcut_url", "")).startswith("http") else r["name"],
-                axis=1,
-            )
+        # Add shortcut link column from URL
+        has_urls = "shortcut_url" in page_df.columns and page_df["shortcut_url"].str.startswith("http").any()
+        if has_urls:
+            styled_page.insert(0, "link", page_df["shortcut_url"])
 
         styled_page["decision"] = styled_page["decision"].map({
             "L2 Can Support": "\u2705 L2 Can Support",
@@ -906,17 +904,21 @@ with tab1:
             "Insufficient Data": "\u2753 Insufficient Data",
         }).fillna(styled_page.get("decision", ""))
 
+        col_config = {}
+        if has_urls:
+            col_config["link"] = st.column_config.LinkColumn(
+                "Open",
+                display_text="Open",
+                width="small",
+            )
+
         selection = st.dataframe(
             styled_page,
             use_container_width=True,
             height=600,
             on_select="rerun",
             selection_mode="single-row",
-            column_config={
-                "name": st.column_config.LinkColumn(
-                    "Title",
-                ),
-            },
+            column_config=col_config,
         )
 
         # ── Pagination arrows below table ──────────────────────────────
