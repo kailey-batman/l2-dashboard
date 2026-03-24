@@ -676,13 +676,15 @@ with tab1:
         def metric_card_html(label, value, delta=None, delta_color="normal"):
             """Return HTML string for a metric card."""
             parts = []
-            parts.append('<div style="background-color:#373E47;border:1px solid #444C56;border-radius:10px;padding:14px;min-height:120px;display:flex;flex-direction:column;justify-content:space-between;">')
+            parts.append('<div style="background-color:#373E47;border:1px solid #444C56;border-radius:10px;padding:14px;height:130px;display:flex;flex-direction:column;justify-content:space-between;">')
             parts.append(f'<div style="color:#9E9E9E;font-size:16px;font-weight:700;">{label}</div>')
             parts.append(f'<div style="color:#E0E0E0;font-size:28px;font-weight:700;">{value}</div>')
             if delta:
                 c = "#00E676" if delta_color == "normal" else "#ff5252"
                 parts.append(f'<span style="color:{c};font-size:12px;">&#8593; {delta}</span>')
-            parts.append('<div style="color:#636b75;font-size:8px;margin-top:4px;">&#8595; drill down</div>')
+            else:
+                parts.append('<span style="font-size:12px;visibility:hidden;">&#8593; 0%</span>')
+            parts.append('<div style="color:#636b75;font-size:8px;">&#8595; drill down</div>')
             parts.append('</div>')
             return "".join(parts)
 
@@ -690,9 +692,9 @@ with tab1:
         st.markdown("""<style>
             div[data-testid="stButton"] button[kind="secondary"] {
                 position:relative !important;
-                margin-top:-130px !important;
-                height:130px !important;
-                min-height:130px !important;
+                margin-top:-140px !important;
+                height:140px !important;
+                min-height:140px !important;
                 width:100% !important;
                 opacity:0 !important;
                 cursor:pointer !important;
