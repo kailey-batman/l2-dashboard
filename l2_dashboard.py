@@ -441,23 +441,26 @@ def run_analysis_background(rows, existing_results, rerun_all):
 
             set_analysis_progress(i + 1, len(new_rows), name)
 
-            # Read L2 involvement from sheet tag (not from AI)
-            l2_tag = row.get("L2 Support Level", "").strip()
-            l2_engineer = "None"
+            # Read L2 involvement from sheet columns (not from AI)
+            l2_support_level = row.get("L2 Support Level", "").strip()
+            l2_engineer = row.get("L2 Engineer", "").strip() or "None"
+
+            # Map the 1-5 scale to a label
+            l2_level_map = {
+                "5": "5 - Independent Resolution",
+                "4": "4 - Near-Complete (Assisted)",
+                "3": "3 - Framework Provided",
+                "2": "2 - Technical Enrichment",
+                "1": "1 - Escalated (No Context)",
+            }
             l2_involvement = "None"
-            if l2_tag:
-                # Expected format: "Sean - Responsible", "Jayson - Assisted", etc.
-                tag_lower = l2_tag.lower()
-                if "sean" in tag_lower:
-                    l2_engineer = "Sean"
-                elif "jayson" in tag_lower:
-                    l2_engineer = "Jayson"
-                if "responsible" in tag_lower:
-                    l2_involvement = "Responsible"
-                elif "assisted" in tag_lower:
-                    l2_involvement = "Assisted"
-                elif l2_engineer != "None":
-                    l2_involvement = "Responsible"  # Default if engineer named but no level
+            if l2_support_level:
+                # Handle if they enter just the number or the full label
+                level_num = l2_support_level.strip()[0] if l2_support_level.strip() else ""
+                if level_num in l2_level_map:
+                    l2_involvement = l2_level_map[level_num]
+                else:
+                    l2_involvement = l2_support_level  # Pass through whatever they entered
 
             result = evaluate_ticket(client, name, desc, intercom_transcript, slack_transcript, shortcut_activity)
             new_results.append({
@@ -467,7 +470,7 @@ def run_analysis_background(rows, existing_results, rerun_all):
                 "decision": result.get("decision", "Error"),
                 "category": result.get("category", "Other"),
                 "support_person": result.get("support_person", "Unknown"),
-                "l2_engineer": l2_engineer,
+                "l2_engineer": l2_engineer if l2_engineer != "" else "None",
                 "l2_involvement": l2_involvement,
                 "confidence": result.get("confidence", 0),
                 "explanation": result.get("explanation", ""),
@@ -650,8 +653,11 @@ with tab1:
         avg_conf = results_df[results_df["decision"] != "Insufficient Data"]["confidence"].mean() if "confidence" in results_df.columns else 0
 
         l2_involved = results_df[results_df["l2_involvement"] != "None"]
-        l2_responsible = results_df[results_df["l2_involvement"] == "Responsible"]
-        l2_assisted = results_df[results_df["l2_involvement"] == "Assisted"]
+        l2_level_5 = results_df[results_df["l2_involvement"].str.startswith("5", na=False)]
+        l2_level_4 = results_df[results_df["l2_involvement"].str.startswith("4", na=False)]
+        l2_level_3 = results_df[results_df["l2_involvement"].str.startswith("3", na=False)]
+        l2_level_2 = results_df[results_df["l2_involvement"].str.startswith("2", na=False)]
+        l2_level_1 = results_df[results_df["l2_involvement"].str.startswith("1", na=False)]
         sean_tickets = results_df[results_df["l2_engineer"] == "Sean"]
         jayson_tickets = results_df[results_df["l2_engineer"] == "Jayson"]
         could_but_didnt_df = results_df[
@@ -749,35 +755,63 @@ with tab1:
             html = html.replace("&#8595; drill down", "")
             st.markdown(html, unsafe_allow_html=True)
 
-        # ── Row 2: Actual L2 involvement ──────────────────────────────
-        st.markdown("**Actual L2 Engineer Involvement**")
-        l2_col1, l2_col2, l2_col3, l2_col4, l2_col5 = st.columns(5)
+        # ── Row 2: L2 Engineer Involvement ───────────────────────────
+        st.markdown("**L2 Engineer Involvement**")
+        l2_r1c1, l2_r1c2, l2_r1c3, l2_r1c4 = st.columns(4)
 
-        with l2_col1:
+        with l2_r1c1:
             pct = f"{len(l2_involved)/total*100:.0f}%" if total > 0 else "0%"
             st.markdown(metric_card_html("L2 Involved", len(l2_involved), delta=pct), unsafe_allow_html=True)
             if st.button("x", key="btn_l2_involved", use_container_width=True):
                 st.session_state.metric_filter = ("l2_involvement", "!=None")
                 st.rerun()
-        with l2_col2:
-            st.markdown(metric_card_html("L2 Responsible", len(l2_responsible)), unsafe_allow_html=True)
-            if st.button("x", key="btn_l2_responsible", use_container_width=True):
-                st.session_state.metric_filter = ("l2_involvement", "Responsible")
-                st.rerun()
-        with l2_col3:
-            st.markdown(metric_card_html("L2 Assisted", len(l2_assisted)), unsafe_allow_html=True)
-            if st.button("x", key="btn_l2_assisted", use_container_width=True):
-                st.session_state.metric_filter = ("l2_involvement", "Assisted")
-                st.rerun()
-        with l2_col4:
+        with l2_r1c2:
             st.markdown(metric_card_html("Sean", len(sean_tickets)), unsafe_allow_html=True)
             if st.button("x", key="btn_sean", use_container_width=True):
                 st.session_state.metric_filter = ("l2_engineer", "Sean")
                 st.rerun()
-        with l2_col5:
+        with l2_r1c3:
             st.markdown(metric_card_html("Jayson", len(jayson_tickets)), unsafe_allow_html=True)
             if st.button("x", key="btn_jayson", use_container_width=True):
                 st.session_state.metric_filter = ("l2_engineer", "Jayson")
+                st.rerun()
+        with l2_r1c4:
+            avg_level = 0
+            if len(l2_involved) > 0:
+                levels = l2_involved["l2_involvement"].str[0].apply(pd.to_numeric, errors="coerce").dropna()
+                avg_level = levels.mean() if len(levels) > 0 else 0
+            html = metric_card_html("Avg L2 Level", f"{avg_level:.1f}/5")
+            html = html.replace("&#8595; drill down", "")
+            st.markdown(html, unsafe_allow_html=True)
+
+        # ── Row 3: L2 Support Levels ──────────────────────────────────
+        st.markdown("**L2 Support Levels**")
+        lv1, lv2, lv3, lv4, lv5 = st.columns(5)
+
+        with lv1:
+            st.markdown(metric_card_html("5 - Independent", len(l2_level_5)), unsafe_allow_html=True)
+            if st.button("x", key="btn_lv5", use_container_width=True):
+                st.session_state.metric_filter = ("l2_level", "5")
+                st.rerun()
+        with lv2:
+            st.markdown(metric_card_html("4 - Near-Complete", len(l2_level_4)), unsafe_allow_html=True)
+            if st.button("x", key="btn_lv4", use_container_width=True):
+                st.session_state.metric_filter = ("l2_level", "4")
+                st.rerun()
+        with lv3:
+            st.markdown(metric_card_html("3 - Framework", len(l2_level_3)), unsafe_allow_html=True)
+            if st.button("x", key="btn_lv3", use_container_width=True):
+                st.session_state.metric_filter = ("l2_level", "3")
+                st.rerun()
+        with lv4:
+            st.markdown(metric_card_html("2 - Enrichment", len(l2_level_2)), unsafe_allow_html=True)
+            if st.button("x", key="btn_lv2", use_container_width=True):
+                st.session_state.metric_filter = ("l2_level", "2")
+                st.rerun()
+        with lv5:
+            st.markdown(metric_card_html("1 - Escalated", len(l2_level_1)), unsafe_allow_html=True)
+            if st.button("x", key="btn_lv1", use_container_width=True):
+                st.session_state.metric_filter = ("l2_level", "1")
                 st.rerun()
 
         # ── Gap analysis ──────────────────────────────────────────────
@@ -793,8 +827,11 @@ with tab1:
         # ── Active filter indicator ──────────────────────────────────
         if st.session_state.metric_filter is not None:
             filt = st.session_state.metric_filter
+            level_labels = {"5": "5 - Independent Resolution", "4": "4 - Near-Complete", "3": "3 - Framework Provided", "2": "2 - Technical Enrichment", "1": "1 - Escalated"}
             if filt[0] == "gap":
                 label = "Gap: Could support but no L2 involvement"
+            elif filt[0] == "l2_level":
+                label = f"L2 Level: {level_labels.get(filt[1], filt[1])}"
             elif filt[1] == "!=None":
                 label = "L2 Involved (any)"
             else:
@@ -866,6 +903,8 @@ with tab1:
                     (filtered["decision"] == "L2 Can Support") &
                     (filtered["l2_involvement"] == "None")
                 ]
+            elif mf[0] == "l2_level":
+                filtered = filtered[filtered["l2_involvement"].str.startswith(mf[1], na=False)]
             elif mf[1] == "!=None":
                 filtered = filtered[filtered[mf[0]] != "None"]
             else:
@@ -1010,13 +1049,17 @@ with tab1:
 
                 # L2 involvement badge
                 l2_eng = row.get("l2_engineer", "None")
-                l2_inv = row.get("l2_involvement", "None")
-                if l2_inv == "Responsible":
-                    st.success(f"**L2: {l2_eng}** — Responsible")
-                elif l2_inv == "Assisted":
-                    st.warning(f"**L2: {l2_eng}** — Assisted")
+                l2_inv = str(row.get("l2_involvement", "None"))
+                if l2_inv != "None" and l2_inv != "":
+                    level_num = l2_inv[0] if l2_inv else ""
+                    if level_num in ("4", "5"):
+                        st.success(f"**L2: {l2_eng}** — {l2_inv}")
+                    elif level_num == "3":
+                        st.warning(f"**L2: {l2_eng}** — {l2_inv}")
+                    else:
+                        st.info(f"**L2: {l2_eng}** — {l2_inv}")
                 else:
-                    st.caption("No L2 involvement detected")
+                    st.caption("No L2 involvement")
 
             with col_mid:
                 try:
@@ -1044,8 +1087,8 @@ with tab1:
                 with tag_col2:
                     tag_involvement = st.selectbox(
                         "Involvement:",
-                        ["None", "Responsible", "Assisted"],
-                        index=["None", "Responsible", "Assisted"].index(row.get("l2_involvement", "None")) if row.get("l2_involvement", "None") in ["None", "Responsible", "Assisted"] else 0,
+                        ["None", "5 - Independent Resolution", "4 - Near-Complete (Assisted)", "3 - Framework Provided", "2 - Technical Enrichment", "1 - Escalated (No Context)"],
+                        index=0,
                         key=f"tag_inv_{selected}",
                     )
                 if st.button("Save L2 Tag", key=f"save_tag_{selected}"):
