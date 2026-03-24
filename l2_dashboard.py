@@ -90,7 +90,12 @@ Also classify the ticket into the single most relevant category from this list:
 - Other
 
 SUPPORT PERSON IDENTIFICATION:
-Identify the support person who was the primary point of contact communicating with the customer. Look SPECIFICALLY in the Intercom Transcript for the name of the internal team member who was replying to the customer. This is the person sending messages TO the customer — not the customer themselves, not engineers mentioned in Shortcut, and not people CC'd. Look for message headers like "[Name]:" or signatures in the Intercom transcript. If multiple people communicated with the customer, pick the one who had the most interactions. If you truly cannot identify anyone from the Intercom transcript, use "Unknown".
+Identify the support person who was conversing with the customer in the Intercom Transcript. The Intercom Transcript uses this format for messages:
+- "--- Support (Person Name) ---" for internal support team messages
+- "--- Customer (Person Name) ---" for customer messages
+- "--- Support (Your Guideian) ---" is an automated bot message, NOT a real person — ignore these
+
+Look for lines matching "--- Support (Name) ---" where Name is NOT "Your Guideian". That person is the support person. If multiple support people appear, pick the one who sent the most messages. Only use names from "--- Support (...) ---" lines — do NOT use names from "--- Customer (...) ---" lines (those are customers). If no real support person appears in the Intercom Transcript, use "Unknown".
 
 L2 ENGINEER INVOLVEMENT:
 Our L2 engineers are Sean and Jayson. You must determine if either performed concrete technical work to fix the issue.
@@ -455,8 +460,8 @@ def run_analysis_background(rows, existing_results, rerun_all):
             shortcut_id = row.get("id", "").strip()
             shortcut_url = f"https://app.shortcut.com/fieldguide/story/{shortcut_id}" if shortcut_id else ""
             desc = row.get("description", "").strip()
-            intercom_transcript = row.get("Intercom Transcript", "").strip()
-            slack_transcript = row.get("Slack Conversation Transcript", "").strip()
+            intercom_transcript = (row.get("Intercom Transcription", "") or row.get("Intercom Transcript", "")).strip()
+            slack_transcript = (row.get("Slack Transcript", "") or row.get("Slack Conversation Transcript", "")).strip()
             shortcut_activity = row.get("Shortcut Ticket Activity", "").strip()
 
             set_analysis_progress(i + 1, len(new_rows), name)
