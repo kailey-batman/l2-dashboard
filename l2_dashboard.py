@@ -650,44 +650,26 @@ with tab1:
             (results_df["l2_involvement"] == "None")
         ]
 
-        # ── Drill-down card style ────────────────────────────────────
+        # ── Drill-down button style ──────────────────────────────────
         st.markdown("""
         <style>
-            .metric-card {
-                background-color: #373E47; border: 1px solid #444C56; border-radius: 10px;
-                padding: 14px 14px 8px 14px; margin-bottom: 4px;
-            }
-            .metric-card:hover { border-color: #00E676; }
-            .metric-card .mc-label { color: #9E9E9E; font-size: 0.85rem; font-weight: 700; }
-            .metric-card .mc-value { color: #E0E0E0; font-size: 1.8rem; font-weight: 700; margin: 2px 0; }
-            .metric-card .mc-pct { color: #00E676; font-size: 0.8rem; }
-            .metric-card .mc-pct.inverse { color: #ff5252; }
-            .metric-card .mc-drill { color: #636b75; font-size: 0.7rem; margin-top: 4px; }
-            .metric-btn > button {
+            .drill-btn > button {
                 background-color: transparent !important;
                 border: none !important;
-                padding: 0 !important;
-                margin: -4px 0 0 0 !important;
+                padding: 2px 0 0 0 !important;
                 min-height: 0 !important;
+                height: auto !important;
                 width: 100% !important;
                 color: #636b75 !important;
-                font-size: 0.7rem !important;
+                font-size: 0.65rem !important;
+                text-align: left !important;
             }
-            .metric-btn > button:hover {
+            .drill-btn > button:hover {
                 color: #00E676 !important;
                 background-color: transparent !important;
             }
         </style>
         """, unsafe_allow_html=True)
-
-        def render_card(label, value, pct=None, inverse=False):
-            pct_class = "inverse" if inverse else ""
-            pct_html = f'<div class="mc-pct {pct_class}">{pct}</div>' if pct else ""
-            return f"""<div class="metric-card">
-                <div class="mc-label">{label}</div>
-                <div class="mc-value">{value}</div>
-                {pct_html}
-            </div>"""
 
         # ── Row 1: L2 Capability Assessment ───────────────────────────
         st.markdown("**L2 Capability Assessment**")
@@ -696,85 +678,62 @@ with tab1:
         active = st.session_state.metric_filter
 
         with col1:
-            st.markdown(render_card("Total Escalations", total), unsafe_allow_html=True)
-            st.markdown('<div class="metric-btn">', unsafe_allow_html=True)
+            st.metric("Total Escalations", total)
             if st.button("↓ drill down", key="btn_total", use_container_width=True):
                 st.session_state.metric_filter = None
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         with col2:
-            pct = f"↑ {supported/total*100:.0f}%" if total > 0 else "0%"
-            st.markdown(render_card("L2 Can Support", supported, pct), unsafe_allow_html=True)
-            st.markdown('<div class="metric-btn">', unsafe_allow_html=True)
+            st.metric("L2 Can Support", supported, delta=f"{supported/total*100:.0f}%" if total > 0 else "0%")
             if st.button("↓ drill down", key="btn_supported", use_container_width=True):
                 st.session_state.metric_filter = ("decision", "L2 Can Support")
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         with col3:
-            pct = f"↑ {unsupported/total*100:.0f}%" if total > 0 else "0%"
-            st.markdown(render_card("L2 Cannot Support", unsupported, pct, inverse=True), unsafe_allow_html=True)
-            st.markdown('<div class="metric-btn">', unsafe_allow_html=True)
+            st.metric("L2 Cannot Support", unsupported, delta=f"{unsupported/total*100:.0f}%" if total > 0 else "0%", delta_color="inverse")
             if st.button("↓ drill down", key="btn_unsupported", use_container_width=True):
                 st.session_state.metric_filter = ("decision", "L2 Cannot Support")
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         with col4:
-            st.markdown(render_card("Partially Supported", partial), unsafe_allow_html=True)
-            st.markdown('<div class="metric-btn">', unsafe_allow_html=True)
+            st.metric("Partially Supported", partial)
             if st.button("↓ drill down", key="btn_partial", use_container_width=True):
                 st.session_state.metric_filter = ("decision", "Partially Supported")
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         with col5:
-            st.markdown(render_card("Insufficient Data", insufficient), unsafe_allow_html=True)
-            st.markdown('<div class="metric-btn">', unsafe_allow_html=True)
+            st.metric("Insufficient Data", insufficient)
             if st.button("↓ drill down", key="btn_insufficient", use_container_width=True):
                 st.session_state.metric_filter = ("decision", "Insufficient Data")
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         with col6:
-            st.markdown(render_card("Avg Confidence", f"{avg_conf:.1f}/5"), unsafe_allow_html=True)
+            st.metric("Avg Confidence", f"{avg_conf:.1f}/5")
 
         # ── Row 2: Actual L2 involvement ──────────────────────────────
         st.markdown("**Actual L2 Engineer Involvement**")
         l2_col1, l2_col2, l2_col3, l2_col4, l2_col5 = st.columns(5)
 
         with l2_col1:
-            pct = f"↑ {len(l2_involved)/total*100:.0f}%" if total > 0 else "0%"
-            st.markdown(render_card("L2 Involved", len(l2_involved), pct), unsafe_allow_html=True)
-            st.markdown('<div class="metric-btn">', unsafe_allow_html=True)
+            st.metric("L2 Involved", len(l2_involved), delta=f"{len(l2_involved)/total*100:.0f}%" if total > 0 else "0%")
             if st.button("↓ drill down", key="btn_l2_involved", use_container_width=True):
                 st.session_state.metric_filter = ("l2_involvement", "!=None")
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         with l2_col2:
-            st.markdown(render_card("L2 Responsible", len(l2_responsible)), unsafe_allow_html=True)
-            st.markdown('<div class="metric-btn">', unsafe_allow_html=True)
+            st.metric("L2 Responsible", len(l2_responsible))
             if st.button("↓ drill down", key="btn_l2_responsible", use_container_width=True):
                 st.session_state.metric_filter = ("l2_involvement", "Responsible")
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         with l2_col3:
-            st.markdown(render_card("L2 Assisted", len(l2_assisted)), unsafe_allow_html=True)
-            st.markdown('<div class="metric-btn">', unsafe_allow_html=True)
+            st.metric("L2 Assisted", len(l2_assisted))
             if st.button("↓ drill down", key="btn_l2_assisted", use_container_width=True):
                 st.session_state.metric_filter = ("l2_involvement", "Assisted")
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         with l2_col4:
-            st.markdown(render_card("Sean", len(sean_tickets)), unsafe_allow_html=True)
-            st.markdown('<div class="metric-btn">', unsafe_allow_html=True)
+            st.metric("Sean", len(sean_tickets))
             if st.button("↓ drill down", key="btn_sean", use_container_width=True):
                 st.session_state.metric_filter = ("l2_engineer", "Sean")
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         with l2_col5:
-            st.markdown(render_card("Jayson", len(jayson_tickets)), unsafe_allow_html=True)
-            st.markdown('<div class="metric-btn">', unsafe_allow_html=True)
+            st.metric("Jayson", len(jayson_tickets))
             if st.button("↓ drill down", key="btn_jayson", use_container_width=True):
                 st.session_state.metric_filter = ("l2_engineer", "Jayson")
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
         # ── Gap analysis ──────────────────────────────────────────────
         if len(could_but_didnt_df) > 0:
@@ -782,11 +741,9 @@ with tab1:
             with gap_col1:
                 st.info(f"**Gap:** {len(could_but_didnt_df)} tickets L2 *could* have supported but had no L2 involvement")
             with gap_col2:
-                st.markdown('<div class="metric-btn">', unsafe_allow_html=True)
                 if st.button("↓ drill down", key="btn_gap", use_container_width=True):
                     st.session_state.metric_filter = ("gap", "could_but_didnt")
                     st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
 
         # ── Active filter indicator ──────────────────────────────────
         if st.session_state.metric_filter is not None:
