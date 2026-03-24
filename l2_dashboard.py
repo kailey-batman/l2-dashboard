@@ -223,8 +223,8 @@ def color_decision(val):
     return ""
 
 
-RESULTS_COLUMNS = ["name", "shortcut_url", "description", "decision", "category", "support_person",
-                    "l2_engineer", "l2_involvement", "confidence", "explanation"]
+RESULTS_COLUMNS = ["name", "shortcut_url", "created_at", "state", "description", "decision", "category",
+                    "support_person", "l2_engineer", "l2_involvement", "confidence", "explanation"]
 
 
 def _get_or_create_worksheet(tab_name, headers=None):
@@ -289,7 +289,7 @@ def load_results():
     df = load_results_from_sheet()
     if df is not None and not df.empty:
         for col, default in [("category", "Other"), ("confidence", 0), ("support_person", "Unknown"),
-                              ("l2_engineer", "None"), ("l2_involvement", "None"), ("shortcut_url", "")]:
+                              ("l2_engineer", "None"), ("l2_involvement", "None"), ("shortcut_url", ""), ("created_at", ""), ("state", "")]:
             if col not in df.columns:
                 df[col] = default
         return df
@@ -299,7 +299,7 @@ def load_results():
             data = json.load(f)
         df = pd.DataFrame(data)
         for col, default in [("category", "Other"), ("confidence", 0), ("support_person", "Unknown"),
-                              ("l2_engineer", "None"), ("l2_involvement", "None"), ("shortcut_url", "")]:
+                              ("l2_engineer", "None"), ("l2_involvement", "None"), ("shortcut_url", ""), ("created_at", ""), ("state", "")]:
             if col not in df.columns:
                 df[col] = default
         return df
@@ -434,6 +434,8 @@ def run_analysis_background(rows, existing_results, rerun_all):
             name = row.get("name", "").strip()
             shortcut_id = row.get("id", "").strip()
             shortcut_url = f"https://app.shortcut.com/fieldguide/story/{shortcut_id}" if shortcut_id else ""
+            created_at = row.get("created_at", "").strip()
+            state = row.get("state", "").strip()
             desc = row.get("description", "").strip()
             intercom_transcript = (row.get("Intercom Transcription", "") or row.get("Intercom Transcript", "")).strip()
             slack_transcript = (row.get("Slack Transcript", "") or row.get("Slack Conversation Transcript", "")).strip()
@@ -466,6 +468,8 @@ def run_analysis_background(rows, existing_results, rerun_all):
             new_results.append({
                 "name": name,
                 "shortcut_url": shortcut_url,
+                "created_at": created_at,
+                "state": state,
                 "description": desc[:200],
                 "decision": result.get("decision", "Error"),
                 "category": result.get("category", "Other"),
@@ -947,16 +951,22 @@ with tab1:
         page_df = filtered.iloc[start_idx:end_idx]
 
         # ── Clickable table ────────────────────────────────────────────
-        display_cols = ["name", "support_person", "category", "decision", "l2_engineer", "l2_involvement", "confidence"]
+        display_cols = ["created_at", "name", "state", "support_person", "category", "decision", "l2_engineer", "l2_involvement", "confidence"]
         available_cols = [c for c in display_cols if c in page_df.columns]
 
         # Build display table
         styled_page = page_df[available_cols].copy()
 
-        # Add shortcut link column from URL
-        has_urls = "shortcut_url" in page_df.columns and page_df["shortcut_url"].str.startswith("http").any()
+        # Format created_at to just the date
+        if "created_at" in styled_page.columns:
+            styled_page["created_at"] = styled_page["created_at"].apply(
+                lambda x: str(x).split(" ")[0] if isinstance(x, str) and " " in x else x
+            )
+
+        # Put shortcut URL into name column for clickable title
+        has_urls = "shortcut_url" in page_df.columns and page_df["shortcut_url"].astype(str).str.startswith("http").any()
         if has_urls:
-            styled_page.insert(0, "link", page_df["shortcut_url"])
+            styled_page["name"] = page_df["shortcut_url"]
 
         styled_page["decision"] = styled_page["decision"].map({
             "L2 Can Support": "\u2705 L2 Can Support",
@@ -965,12 +975,14 @@ with tab1:
             "Insufficient Data": "\u2753 Insufficient Data",
         }).fillna(styled_page.get("decision", ""))
 
-        col_config = {}
+        col_config = {
+            "created_at": st.column_config.TextColumn("Filed", width="small"),
+            "state": st.column_config.TextColumn("Status", width="small"),
+        }
         if has_urls:
-            col_config["link"] = st.column_config.LinkColumn(
-                "Open",
-                display_text="Open",
-                width="small",
+            col_config["name"] = st.column_config.LinkColumn(
+                "Title",
+                display_text=r"story/(.+)",
             )
 
         selection = st.dataframe(
