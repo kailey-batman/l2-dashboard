@@ -441,7 +441,8 @@ def run_analysis_background(rows, existing_results, rerun_all):
         new_results = []
         for i, row in enumerate(new_rows):
             name = row.get("name", "").strip()
-            shortcut_url = row.get("id", "").strip()
+            shortcut_id = row.get("id", "").strip()
+            shortcut_url = f"https://app.shortcut.com/fieldguide/story/{shortcut_id}" if shortcut_id else ""
             desc = row.get("description", "").strip()
             intercom_transcript = row.get("Intercom Transcript", "").strip()
             slack_transcript = row.get("Slack Conversation Transcript", "").strip()
@@ -885,11 +886,19 @@ with tab1:
         page_df = filtered.iloc[start_idx:end_idx]
 
         # ── Clickable table ────────────────────────────────────────────
-        display_cols = ["name", "shortcut_url", "support_person", "category", "decision", "l2_engineer", "l2_involvement", "confidence"]
+        display_cols = ["name", "support_person", "category", "decision", "l2_engineer", "l2_involvement", "confidence"]
         available_cols = [c for c in display_cols if c in page_df.columns]
 
-        # Color-code decisions with indicators
+        # Build display table with shortcut links in name column
         styled_page = page_df[available_cols].copy()
+
+        # Put shortcut URL into name column for LinkColumn rendering
+        if "shortcut_url" in page_df.columns:
+            styled_page["name"] = page_df.apply(
+                lambda r: r["shortcut_url"] if str(r.get("shortcut_url", "")).startswith("http") else r["name"],
+                axis=1,
+            )
+
         styled_page["decision"] = styled_page["decision"].map({
             "L2 Can Support": "\u2705 L2 Can Support",
             "L2 Cannot Support": "\u274c L2 Cannot Support",
@@ -904,9 +913,8 @@ with tab1:
             on_select="rerun",
             selection_mode="single-row",
             column_config={
-                "shortcut_url": st.column_config.LinkColumn(
-                    "Shortcut",
-                    display_text="Open",
+                "name": st.column_config.LinkColumn(
+                    "Title",
                 ),
             },
         )
