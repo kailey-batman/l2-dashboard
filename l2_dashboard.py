@@ -625,10 +625,11 @@ with tab1:
     overrides = load_overrides()
 
     if results_df is not None and not results_df.empty:
-        # ── Summary metrics ─────────────────────────────────────────────
-        # ── Summary metrics row 1: L2 capability ─────────────────────
-        st.markdown("**L2 Capability Assessment**")
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        # ── Metric filter state ──────────────────────────────────────
+        if "metric_filter" not in st.session_state:
+            st.session_state.metric_filter = None
+
+        # ── Summary metrics ─────────────────────────────────────────
         total = len(results_df)
         supported = len(results_df[results_df["decision"] == "L2 Can Support"])
         unsupported = len(results_df[results_df["decision"] == "L2 Cannot Support"])
@@ -636,36 +637,93 @@ with tab1:
         insufficient = len(results_df[results_df["decision"] == "Insufficient Data"])
         avg_conf = results_df[results_df["decision"] != "Insufficient Data"]["confidence"].mean() if "confidence" in results_df.columns else 0
 
-        col1.metric("Total Escalations", total)
-        col2.metric("L2 Can Support", supported, delta=f"{supported/total*100:.0f}%" if total > 0 else "0%")
-        col3.metric("L2 Cannot Support", unsupported, delta=f"{unsupported/total*100:.0f}%" if total > 0 else "0%", delta_color="inverse")
-        col4.metric("Partially Supported", partial)
-        col5.metric("Insufficient Data", insufficient)
-        col6.metric("Avg Confidence", f"{avg_conf:.1f}/5")
-
-        # ── Summary metrics row 2: Actual L2 involvement ─────────────
-        st.markdown("**Actual L2 Engineer Involvement**")
-        l2_col1, l2_col2, l2_col3, l2_col4, l2_col5 = st.columns(5)
-
         l2_involved = results_df[results_df["l2_involvement"] != "None"]
         l2_responsible = results_df[results_df["l2_involvement"] == "Responsible"]
         l2_assisted = results_df[results_df["l2_involvement"] == "Assisted"]
         sean_tickets = results_df[results_df["l2_engineer"] == "Sean"]
         jayson_tickets = results_df[results_df["l2_engineer"] == "Jayson"]
-
-        l2_col1.metric("L2 Involved", len(l2_involved), delta=f"{len(l2_involved)/total*100:.0f}%" if total > 0 else "0%")
-        l2_col2.metric("L2 Responsible", len(l2_responsible))
-        l2_col3.metric("L2 Assisted", len(l2_assisted))
-        l2_col4.metric("Sean", len(sean_tickets))
-        l2_col5.metric("Jayson", len(jayson_tickets))
-
-        # ── Gap analysis ─────────────────────────────────────────────
-        could_but_didnt = len(results_df[
+        could_but_didnt_df = results_df[
             (results_df["decision"] == "L2 Can Support") &
             (results_df["l2_involvement"] == "None")
-        ])
-        if could_but_didnt > 0:
-            st.info(f"**Gap:** {could_but_didnt} tickets L2 *could* have supported but had no L2 involvement")
+        ]
+
+        # ── Row 1: L2 Capability Assessment (clickable) ──────────────
+        st.markdown("**L2 Capability Assessment**")
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+
+        with col1:
+            st.metric("Total Escalations", total)
+            if st.button("View All", key="btn_total", use_container_width=True):
+                st.session_state.metric_filter = None
+        with col2:
+            st.metric("L2 Can Support", supported, delta=f"{supported/total*100:.0f}%" if total > 0 else "0%")
+            if st.button("View", key="btn_supported", use_container_width=True):
+                st.session_state.metric_filter = ("decision", "L2 Can Support")
+        with col3:
+            st.metric("L2 Cannot Support", unsupported, delta=f"{unsupported/total*100:.0f}%" if total > 0 else "0%", delta_color="inverse")
+            if st.button("View", key="btn_unsupported", use_container_width=True):
+                st.session_state.metric_filter = ("decision", "L2 Cannot Support")
+        with col4:
+            st.metric("Partially Supported", partial)
+            if st.button("View", key="btn_partial", use_container_width=True):
+                st.session_state.metric_filter = ("decision", "Partially Supported")
+        with col5:
+            st.metric("Insufficient Data", insufficient)
+            if st.button("View", key="btn_insufficient", use_container_width=True):
+                st.session_state.metric_filter = ("decision", "Insufficient Data")
+        with col6:
+            st.metric("Avg Confidence", f"{avg_conf:.1f}/5")
+
+        # ── Row 2: Actual L2 involvement (clickable) ─────────────────
+        st.markdown("**Actual L2 Engineer Involvement**")
+        l2_col1, l2_col2, l2_col3, l2_col4, l2_col5 = st.columns(5)
+
+        with l2_col1:
+            st.metric("L2 Involved", len(l2_involved), delta=f"{len(l2_involved)/total*100:.0f}%" if total > 0 else "0%")
+            if st.button("View", key="btn_l2_involved", use_container_width=True):
+                st.session_state.metric_filter = ("l2_involvement", "!=None")
+        with l2_col2:
+            st.metric("L2 Responsible", len(l2_responsible))
+            if st.button("View", key="btn_l2_responsible", use_container_width=True):
+                st.session_state.metric_filter = ("l2_involvement", "Responsible")
+        with l2_col3:
+            st.metric("L2 Assisted", len(l2_assisted))
+            if st.button("View", key="btn_l2_assisted", use_container_width=True):
+                st.session_state.metric_filter = ("l2_involvement", "Assisted")
+        with l2_col4:
+            st.metric("Sean", len(sean_tickets))
+            if st.button("View", key="btn_sean", use_container_width=True):
+                st.session_state.metric_filter = ("l2_engineer", "Sean")
+        with l2_col5:
+            st.metric("Jayson", len(jayson_tickets))
+            if st.button("View", key="btn_jayson", use_container_width=True):
+                st.session_state.metric_filter = ("l2_engineer", "Jayson")
+
+        # ── Gap analysis (clickable) ─────────────────────────────────
+        if len(could_but_didnt_df) > 0:
+            gap_col1, gap_col2 = st.columns([5, 1])
+            with gap_col1:
+                st.info(f"**Gap:** {len(could_but_didnt_df)} tickets L2 *could* have supported but had no L2 involvement")
+            with gap_col2:
+                if st.button("View Gap", key="btn_gap", use_container_width=True):
+                    st.session_state.metric_filter = ("gap", "could_but_didnt")
+
+        # ── Active filter indicator ──────────────────────────────────
+        if st.session_state.metric_filter is not None:
+            filt = st.session_state.metric_filter
+            if filt[0] == "gap":
+                label = "Gap: Could support but no L2 involvement"
+            elif filt[1] == "!=None":
+                label = "L2 Involved (any)"
+            else:
+                label = f"{filt[0]}: {filt[1]}"
+            filter_col1, filter_col2 = st.columns([5, 1])
+            with filter_col1:
+                st.warning(f"Filtered by: **{label}**")
+            with filter_col2:
+                if st.button("Clear Filter", key="btn_clear_filter", use_container_width=True):
+                    st.session_state.metric_filter = None
+                    st.rerun()
 
         # ── Comparison with human labels ────────────────────────────────
         if "human_decision" in results_df.columns or overrides:
@@ -713,6 +771,20 @@ with tab1:
                 sort_order = st.selectbox("Order:", ["Ascending", "Descending"])
 
         filtered = results_df.copy()
+
+        # Apply metric card filter
+        mf = st.session_state.get("metric_filter")
+        if mf is not None:
+            if mf[0] == "gap":
+                filtered = filtered[
+                    (filtered["decision"] == "L2 Can Support") &
+                    (filtered["l2_involvement"] == "None")
+                ]
+            elif mf[1] == "!=None":
+                filtered = filtered[filtered[mf[0]] != "None"]
+            else:
+                filtered = filtered[filtered[mf[0]] == mf[1]]
+
         if search_query:
             mask = (
                 filtered["name"].str.contains(search_query, case=False, na=False) |
