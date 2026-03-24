@@ -829,10 +829,14 @@ with tab1:
             with sort_col2:
                 sort_order = st.selectbox("Order:", ["Ascending", "Descending"])
 
-        filtered = results_df.copy()
+        # Exclude Insufficient Data unless explicitly drilling into it
+        mf = st.session_state.get("metric_filter")
+        if mf is not None and mf == ("decision", "Insufficient Data"):
+            filtered = results_df.copy()
+        else:
+            filtered = results_df[results_df["decision"] != "Insufficient Data"].copy()
 
         # Apply metric card filter
-        mf = st.session_state.get("metric_filter")
         if mf is not None:
             if mf[0] == "gap":
                 filtered = filtered[
