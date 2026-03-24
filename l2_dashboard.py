@@ -232,7 +232,7 @@ def color_decision(val):
     return ""
 
 
-RESULTS_COLUMNS = ["name", "description", "decision", "category", "support_person",
+RESULTS_COLUMNS = ["name", "shortcut_url", "description", "decision", "category", "support_person",
                     "l2_engineer", "l2_involvement", "confidence", "explanation"]
 
 
@@ -298,7 +298,7 @@ def load_results():
     df = load_results_from_sheet()
     if df is not None and not df.empty:
         for col, default in [("category", "Other"), ("confidence", 0), ("support_person", "Unknown"),
-                              ("l2_engineer", "None"), ("l2_involvement", "None")]:
+                              ("l2_engineer", "None"), ("l2_involvement", "None"), ("shortcut_url", "")]:
             if col not in df.columns:
                 df[col] = default
         return df
@@ -308,7 +308,7 @@ def load_results():
             data = json.load(f)
         df = pd.DataFrame(data)
         for col, default in [("category", "Other"), ("confidence", 0), ("support_person", "Unknown"),
-                              ("l2_engineer", "None"), ("l2_involvement", "None")]:
+                              ("l2_engineer", "None"), ("l2_involvement", "None"), ("shortcut_url", "")]:
             if col not in df.columns:
                 df[col] = default
         return df
@@ -441,6 +441,7 @@ def run_analysis_background(rows, existing_results, rerun_all):
         new_results = []
         for i, row in enumerate(new_rows):
             name = row.get("name", "").strip()
+            shortcut_url = row.get("id", "").strip()
             desc = row.get("description", "").strip()
             intercom_transcript = row.get("Intercom Transcript", "").strip()
             slack_transcript = row.get("Slack Conversation Transcript", "").strip()
@@ -451,6 +452,7 @@ def run_analysis_background(rows, existing_results, rerun_all):
             result = evaluate_ticket(client, name, desc, intercom_transcript, slack_transcript, shortcut_activity)
             new_results.append({
                 "name": name,
+                "shortcut_url": shortcut_url,
                 "description": desc[:200],
                 "decision": result.get("decision", "Error"),
                 "category": result.get("category", "Other"),
@@ -879,7 +881,7 @@ with tab1:
         page_df = filtered.iloc[start_idx:end_idx]
 
         # ── Clickable table ────────────────────────────────────────────
-        display_cols = ["name", "support_person", "category", "decision", "l2_engineer", "l2_involvement", "confidence"]
+        display_cols = ["name", "shortcut_url", "support_person", "category", "decision", "l2_engineer", "l2_involvement", "confidence"]
         available_cols = [c for c in display_cols if c in page_df.columns]
 
         # Color-code decisions with indicators
@@ -897,6 +899,12 @@ with tab1:
             height=600,
             on_select="rerun",
             selection_mode="single-row",
+            column_config={
+                "shortcut_url": st.column_config.LinkColumn(
+                    "Shortcut",
+                    display_text="Open",
+                ),
+            },
         )
 
         # ── Pagination arrows below table ──────────────────────────────
@@ -946,7 +954,11 @@ with tab1:
                 selected = detail_ticket
             row = filtered[filtered["name"] == selected].iloc[0]
 
-            st.markdown(f"### {selected}")
+            sc_url = row.get("shortcut_url", "")
+            if sc_url:
+                st.markdown(f"### [{selected}]({sc_url})")
+            else:
+                st.markdown(f"### {selected}")
 
             col_left, col_mid, col_right = st.columns([1, 1, 2])
             with col_left:
