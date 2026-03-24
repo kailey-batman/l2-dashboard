@@ -89,25 +89,33 @@ Also classify the ticket into the single most relevant category from this list:
 - Infrastructure Change
 - Other
 
-Also identify the support person who was handling customer communication for this ticket. Look for names of support agents, representatives, or team members in the Intercom transcript and description who were responding to or assisting the customer. This is the internal support person, NOT the customer. If you cannot identify a specific support person, use "Unknown".
+SUPPORT PERSON IDENTIFICATION:
+Identify the support person who was the primary point of contact communicating with the customer. Look SPECIFICALLY in the Intercom Transcript for the name of the internal team member who was replying to the customer. This is the person sending messages TO the customer — not the customer themselves, not engineers mentioned in Shortcut, and not people CC'd. Look for message headers like "[Name]:" or signatures in the Intercom transcript. If multiple people communicated with the customer, pick the one who had the most interactions. If you truly cannot identify anyone from the Intercom transcript, use "Unknown".
 
-Our L2 engineers are Sean and Jayson. Determine if either of them was involved in actually FIXING the issue — not just discussing it with the customer.
+L2 ENGINEER INVOLVEMENT:
+Our L2 engineers are Sean and Jayson. You must determine if either was involved in actually FIXING the issue.
 
-IMPORTANT: Jayson also works as an L1 support rep, so him appearing in customer conversations (Intercom, Slack) does NOT count as L2 involvement. Only count Sean or Jayson as involved if there is evidence in the Shortcut Ticket Activity or technical comments that they:
-- Submitted or referenced a PR / code change / commit
-- Proposed a technical solution AND acted on it (not just discussed it)
-- Performed a data fix, configuration change, or deploy
-- Were assigned as the owner of the engineering fix
+CRITICAL — DEFAULT TO "None": Unless you find CLEAR, EXPLICIT evidence of Sean or Jayson making a technical fix, the answer is "None". When in doubt, choose "None".
 
-Do NOT count as L2 involvement:
-- Customer-facing communication (Intercom replies, Slack messages to the customer)
-- Simply being mentioned or tagged in a ticket
-- Asking questions or gathering information without delivering a fix
+Jayson is PRIMARILY an L1 support rep. He talks to customers, triages tickets, and gathers information as part of his normal L1 duties. NONE of that counts as L2 involvement:
+- Jayson replying to customers in Intercom = L1 work, NOT L2
+- Jayson messaging in Slack about a ticket = L1 work, NOT L2
+- Jayson creating or updating a Shortcut ticket = L1 work, NOT L2
+- Jayson asking engineers questions = L1 work, NOT L2
+- Jayson being assigned to or mentioned in a ticket = NOT L2
 
-Based on this, determine their involvement:
-- "Responsible" = they owned and delivered the fix (PRs, commits, data fixes, deploys)
-- "Assisted" = they contributed technically to the fix but someone else delivered it
-- "None" = no evidence of technical fix involvement
+The ONLY things that count as L2 involvement for Sean or Jayson:
+- They submitted a PR, commit, or code change (look for GitHub links, branch names, commit hashes in Shortcut Activity)
+- They executed a data fix (SQL query, data restore, database change — explicitly described)
+- They made a configuration change or deploy (explicitly described in Shortcut Activity)
+- They wrote a technical solution in Shortcut comments AND there is evidence they personally implemented it
+
+If you only see Jayson in the Intercom transcript or Slack conversation but NOT in the Shortcut Ticket Activity doing technical work, the answer MUST be "None".
+
+Based on this strict criteria:
+- "Responsible" = they personally delivered the fix (PRs, commits, data fixes, deploys — with explicit evidence)
+- "Assisted" = they contributed a specific technical component but someone else delivered the primary fix
+- "None" = no clear evidence of technical fix involvement (THIS IS THE DEFAULT)
 
 Also rate your confidence in this decision from 1 to 5:
 - 1 = Very uncertain, could easily go either way
