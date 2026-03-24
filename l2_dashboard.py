@@ -93,29 +93,10 @@ SUPPORT PERSON IDENTIFICATION:
 Identify the support person who was the primary point of contact communicating with the customer. Look SPECIFICALLY in the Intercom Transcript for the name of the internal team member who was replying to the customer. This is the person sending messages TO the customer — not the customer themselves, not engineers mentioned in Shortcut, and not people CC'd. Look for message headers like "[Name]:" or signatures in the Intercom transcript. If multiple people communicated with the customer, pick the one who had the most interactions. If you truly cannot identify anyone from the Intercom transcript, use "Unknown".
 
 L2 ENGINEER INVOLVEMENT:
-Our L2 engineers are Sean and Jayson. You must determine if either was involved in actually FIXING the issue.
+Our L2 engineer is Sean. Jayson is NOT an L2 engineer — he is L1 support only. NEVER assign Jayson any L2 involvement regardless of what he does in any ticket.
 
-CRITICAL — DEFAULT TO "None": Unless you find CLEAR, EXPLICIT evidence of Sean or Jayson making a technical fix, the answer is "None". When in doubt, choose "None".
-
-Jayson is PRIMARILY an L1 support rep. He talks to customers, triages tickets, and gathers information as part of his normal L1 duties. NONE of that counts as L2 involvement:
-- Jayson replying to customers in Intercom = L1 work, NOT L2
-- Jayson messaging in Slack about a ticket = L1 work, NOT L2
-- Jayson creating or updating a Shortcut ticket = L1 work, NOT L2
-- Jayson asking engineers questions = L1 work, NOT L2
-- Jayson being assigned to or mentioned in a ticket = NOT L2
-
-The ONLY things that count as L2 involvement for Sean or Jayson:
-- They submitted a PR, commit, or code change (look for GitHub links, branch names, commit hashes in Shortcut Activity)
-- They executed a data fix (SQL query, data restore, database change — explicitly described)
-- They made a configuration change or deploy (explicitly described in Shortcut Activity)
-- They wrote a technical solution in Shortcut comments AND there is evidence they personally implemented it
-
-If you only see Jayson in the Intercom transcript or Slack conversation but NOT in the Shortcut Ticket Activity doing technical work, the answer MUST be "None".
-
-Based on this strict criteria:
-- "Responsible" = they personally delivered the fix (PRs, commits, data fixes, deploys — with explicit evidence)
-- "Assisted" = they contributed a specific technical component but someone else delivered the primary fix
-- "None" = no clear evidence of technical fix involvement (THIS IS THE DEFAULT)
+For l2_engineer: only ever return "Sean" or "None". NEVER return "Jayson".
+For l2_involvement: only assign "Responsible" or "Assisted" if Sean (not Jayson) has clear evidence of delivering a technical fix in the Shortcut Ticket Activity (PRs, commits, data fixes, deploys). Otherwise return "None".
 
 Also rate your confidence in this decision from 1 to 5:
 - 1 = Very uncertain, could easily go either way
@@ -652,7 +633,6 @@ with tab1:
         l2_responsible = results_df[results_df["l2_involvement"] == "Responsible"]
         l2_assisted = results_df[results_df["l2_involvement"] == "Assisted"]
         sean_tickets = results_df[results_df["l2_engineer"] == "Sean"]
-        jayson_tickets = results_df[results_df["l2_engineer"] == "Jayson"]
         could_but_didnt_df = results_df[
             (results_df["decision"] == "L2 Can Support") &
             (results_df["l2_involvement"] == "None")
@@ -750,7 +730,7 @@ with tab1:
 
         # ── Row 2: Actual L2 involvement ──────────────────────────────
         st.markdown("**Actual L2 Engineer Involvement**")
-        l2_col1, l2_col2, l2_col3, l2_col4, l2_col5 = st.columns(5)
+        l2_col1, l2_col2, l2_col3, l2_col4 = st.columns(4)
 
         with l2_col1:
             pct = f"{len(l2_involved)/total*100:.0f}%" if total > 0 else "0%"
@@ -773,12 +753,6 @@ with tab1:
             if st.button("x", key="btn_sean", use_container_width=True):
                 st.session_state.metric_filter = ("l2_engineer", "Sean")
                 st.rerun()
-        with l2_col5:
-            st.markdown(metric_card_html("Jayson", len(jayson_tickets)), unsafe_allow_html=True)
-            if st.button("x", key="btn_jayson", use_container_width=True):
-                st.session_state.metric_filter = ("l2_engineer", "Jayson")
-                st.rerun()
-
         # ── Gap analysis ──────────────────────────────────────────────
         if len(could_but_didnt_df) > 0:
             gap_col1, gap_col2 = st.columns([5, 1])
@@ -1036,8 +1010,8 @@ with tab1:
                 with tag_col1:
                     tag_engineer = st.selectbox(
                         "L2 Engineer:",
-                        ["None", "Sean", "Jayson"],
-                        index=["None", "Sean", "Jayson"].index(row.get("l2_engineer", "None")) if row.get("l2_engineer", "None") in ["None", "Sean", "Jayson"] else 0,
+                        ["None", "Sean"],
+                        index=["None", "Sean"].index(row.get("l2_engineer", "None")) if row.get("l2_engineer", "None") in ["None", "Sean"] else 0,
                         key=f"tag_eng_{selected}",
                     )
                 with tag_col2:
