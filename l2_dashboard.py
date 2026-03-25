@@ -15,6 +15,7 @@ from anthropic import Anthropic
 import gspread
 from google.oauth2.service_account import Credentials
 import threading
+import re
 
 # ── L2 Supported Capabilities ──────────────────────────────────────────────
 L2_CAPABILITIES = """
@@ -211,6 +212,61 @@ def evaluate_ticket(client, name, description, intercom_transcript="", slack_tra
         return json.loads(text)
     except json.JSONDecodeError:
         return {"decision": "Error", "category": "Other", "support_person": "Unknown", "l2_engineer": "None", "l2_involvement": "None", "confidence": 0, "explanation": f"Parse error: {text[:200]}"}
+
+
+def parse_shortcut_activity_for_l2(shortcut_activity):
+    """
+    Parse Shortcut activity log to find the most recent L2 Support Level change
+    and the engineer (Jayson or Sean) who made it.
+
+    Handles lines like:
+      [2026-03-24T23:35:21.505Z] Jayson Speer — update story changed L2 Support Level: 4 - Near-Complete (Assisted) → L2 Support Level: 3 - Framework Provided: Ticket Name
+      [2026-03-24T23:35:21.505Z] Sean Smith — update story set L2 Support Level: 5 - Independent Resolution: Ticket Name
+
+    Returns: (l2_involvement_str, l2_engineer_str)
+    """
+    if not shortcut_activity:
+        return "None", "None"
+
+    # Match "changed ... → L2 Support Level: DIGIT" or "set L2 Support Level: DIGIT"
+    pattern = re.compile(
+        r'\[(\d{4}-\d{2}-\d{2}T[\d:.Z]+)\]\s+([^—\n]+?)\s*—\s*update story\s+'
+        r'(?:changed .+?→\s*L2 Support Level:\s*|set L2 Support Level:\s*)(\d)',
+        re.IGNORECASE,
+    )
+
+    matches = []
+    for m in pattern.finditer(shortcut_activity):
+        timestamp_str = m.group(1)
+        person = m.group(2).strip()
+        level_num = m.group(3)
+        matches.append((timestamp_str, person, level_num))
+
+    if not matches:
+        return "None", "None"
+
+    # Most recent change wins (ISO timestamps sort lexicographically)
+    matches.sort(key=lambda x: x[0])
+    _, person, level_num = matches[-1]
+
+    l2_level_map = {
+        "5": "5 - Independent Resolution",
+        "4": "4 - Near-Complete (Assisted)",
+        "3": "3 - Framework Provided",
+        "2": "2 - Technical Enrichment",
+        "1": "1 - Escalated (No Context)",
+    }
+    l2_involvement = l2_level_map.get(level_num, f"{level_num} - Unknown")
+
+    person_lower = person.lower()
+    if "jayson" in person_lower:
+        l2_engineer = "Jayson"
+    elif "sean" in person_lower:
+        l2_engineer = "Sean"
+    else:
+        l2_engineer = "None"
+
+    return l2_involvement, l2_engineer
 
 
 def color_decision(val):
@@ -443,26 +499,8 @@ def run_analysis_background(rows, existing_results, rerun_all):
 
             set_analysis_progress(i + 1, len(new_rows), name)
 
-            # Read L2 involvement from sheet columns (not from AI)
-            l2_support_level = row.get("L2 Support Level", "").strip()
-            l2_engineer = row.get("L2 Engineer", "").strip() or "None"
-
-            # Map the 1-5 scale to a label
-            l2_level_map = {
-                "5": "5 - Independent Resolution",
-                "4": "4 - Near-Complete (Assisted)",
-                "3": "3 - Framework Provided",
-                "2": "2 - Technical Enrichment",
-                "1": "1 - Escalated (No Context)",
-            }
-            l2_involvement = "None"
-            if l2_support_level:
-                # Handle if they enter just the number or the full label
-                level_num = l2_support_level.strip()[0] if l2_support_level.strip() else ""
-                if level_num in l2_level_map:
-                    l2_involvement = l2_level_map[level_num]
-                else:
-                    l2_involvement = l2_support_level  # Pass through whatever they entered
+            # Derive L2 involvement and engineer from Shortcut activity log
+            l2_involvement, l2_engineer = parse_shortcut_activity_for_l2(shortcut_activity)
 
             result = evaluate_ticket(client, name, desc, intercom_transcript, slack_transcript, shortcut_activity)
             new_results.append({
@@ -474,7 +512,7 @@ def run_analysis_background(rows, existing_results, rerun_all):
                 "decision": result.get("decision", "Error"),
                 "category": result.get("category", "Other"),
                 "support_person": result.get("support_person", "Unknown"),
-                "l2_engineer": l2_engineer if l2_engineer != "" else "None",
+                "l2_engineer": l2_engineer,
                 "l2_involvement": l2_involvement,
                 "confidence": result.get("confidence", 0),
                 "explanation": result.get("explanation", ""),
