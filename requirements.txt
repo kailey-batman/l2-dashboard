@@ -3,3 +3,4 @@ pandas
 anthropic
 gspread
 google-auth
+plotly

@@ -16,6 +16,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import threading
 import re
+import plotly.graph_objects as go
 
 # ── L2 Supported Capabilities ──────────────────────────────────────────────
 L2_CAPABILITIES = """
@@ -574,8 +575,8 @@ st.markdown("""
     [data-testid="stMetricValue"] { color: #E0E0E0 !important; }
     [data-testid="stMetricDelta"] { color: #00E676 !important; }
 
-    [data-testid="stSidebar"] { background-color: #333A44; border-right: 1px solid #444C56; }
-    [data-testid="stSidebar"] .stMarkdown h2 { color: #00E676; }
+    [data-testid="stSidebar"] { display: none; }
+    [data-testid="stAppViewContainer"] { padding-left: 1rem; }
 
     .stTabs [data-baseweb="tab"] { color: #9E9E9E; }
     .stTabs [aria-selected="true"] { color: #00E676 !important; border-bottom-color: #00E676 !important; }
@@ -662,26 +663,6 @@ elif analysis_progress and analysis_progress.get("status") == "complete":
         st.success(f"Analysis complete: {prog_total} tickets processed.")
     clear_analysis_progress()
 
-# ── Sidebar ─────────────────────────────────────────────────────────────────
-with st.sidebar:
-    if os.path.exists(logo_path):
-        st.image(logo_path, width=60)
-    st.header("L2 Capabilities")
-    st.markdown("""
-    1. Data Restores
-    2. Small Code Changes
-    3. Account Access Issues
-    4. Configuration Changes
-    5. Data Exports / Imports
-    6. User Management
-    7. Basic Troubleshooting
-    8. Database Queries
-    9. Runbook Execution
-    10. Integration Support
-    11. Cache / Queue Mgmt
-    12. Deployment Support
-    13. Customer Communication
-    """)
 
 # ── Tabs ────────────────────────────────────────────────────────────────────
 tab1, tab2, tab3, tab5 = st.tabs(["Results", "Run Analysis", "Trends", "Google Sheet"])
@@ -936,6 +917,67 @@ with tab1:
                 st.markdown(f"**Reviewer Overrides:** {override_count} tickets reviewed | "
                             f"**Agreement rate:** {agree}/{override_count} "
                             f"({agree/override_count*100:.0f}% agree with model)")
+
+        st.divider()
+
+        # ── Charts ──────────────────────────────────────────────────────
+        chart_left, chart_right = st.columns(2)
+
+        with chart_left:
+            # Decision distribution donut
+            decision_counts = results_df["decision"].value_counts()
+            donut_labels = list(decision_counts.index)
+            donut_values = list(decision_counts.values)
+            color_map = {
+                "L2 Can Support": "#00E676",
+                "L2 Cannot Support": "#ff5252",
+                "Partially Supported": "#FFD740",
+                "Insufficient Data": "#9E9E9E",
+                "Error": "#444C56",
+            }
+            donut_colors = [color_map.get(l, "#444C56") for l in donut_labels]
+            fig_donut = go.Figure(go.Pie(
+                labels=donut_labels,
+                values=donut_values,
+                hole=0.55,
+                marker=dict(colors=donut_colors, line=dict(color="#2D333B", width=2)),
+                textfont=dict(color="#E0E0E0"),
+                hovertemplate="%{label}: %{value} (%{percent})<extra></extra>",
+            ))
+            fig_donut.update_layout(
+                title=dict(text="Decision Distribution", font=dict(color="#E0E0E0", size=14)),
+                paper_bgcolor="#373E47", plot_bgcolor="#373E47",
+                font=dict(color="#E0E0E0"),
+                legend=dict(font=dict(color="#9E9E9E"), bgcolor="#373E47"),
+                margin=dict(t=40, b=10, l=10, r=10),
+                height=280,
+            )
+            st.plotly_chart(fig_donut, use_container_width=True)
+
+        with chart_right:
+            # Top categories horizontal bar
+            if "category" in results_df.columns:
+                cat_counts = (
+                    results_df[results_df["category"].notna() & (results_df["category"] != "Other")]
+                    ["category"].value_counts().head(10)
+                )
+                fig_bar = go.Figure(go.Bar(
+                    x=cat_counts.values,
+                    y=cat_counts.index,
+                    orientation="h",
+                    marker=dict(color="#00E676", opacity=0.85),
+                    hovertemplate="%{y}: %{x}<extra></extra>",
+                ))
+                fig_bar.update_layout(
+                    title=dict(text="Top Categories", font=dict(color="#E0E0E0", size=14)),
+                    paper_bgcolor="#373E47", plot_bgcolor="#373E47",
+                    font=dict(color="#E0E0E0"),
+                    xaxis=dict(color="#9E9E9E", gridcolor="#444C56"),
+                    yaxis=dict(color="#9E9E9E", autorange="reversed"),
+                    margin=dict(t=40, b=10, l=10, r=10),
+                    height=280,
+                )
+                st.plotly_chart(fig_bar, use_container_width=True)
 
         st.divider()
 
