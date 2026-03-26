@@ -741,26 +741,7 @@ with tab1:
     avg_l2_level        = (sum(int(inv[0]) for inv, _ in _tagged if inv[0].isdigit()) / l2_involved_count
                            if l2_involved_count > 0 else 0)
 
-    # ── Debug: show what the sheet parser found ──────────────────────
-    with st.expander("🔍 L2 Debug Info", expanded=True):
-        st.write(f"**Sheet loaded:** {sheet_df_live is not None}")
-        if sheet_df_live is not None:
-            st.write(f"**Sheet rows:** {len(sheet_df_live)}")
-            st.write(f"**Sheet columns:** {list(sheet_df_live.columns)}")
-            activity_col_dbg = next((c for c in sheet_df_live.columns if "activity" in c.lower()), None)
-            name_col_dbg = next((c for c in sheet_df_live.columns if c.lower() == "name"), None)
-            st.write(f"**Activity column found:** {activity_col_dbg}")
-            st.write(f"**Name column found:** {name_col_dbg}")
-            if activity_col_dbg and name_col_dbg:
-                sample_activity = str(sheet_df_live.iloc[0].get(activity_col_dbg, ""))
-                st.write(f"**Sample activity (row 0, first 300 chars):** `{sample_activity[:300]}`")
-        st.write(f"**live_map size:** {len(live_map)}")
-        st.write(f"**Tickets with L2 data:** {l2_involved_count}")
-        if live_map:
-            sample_tagged = [(k, v) for k, v in live_map.items() if v[0] != "None"][:5]
-            st.write(f"**First 5 tagged:** {sample_tagged}")
-
-    if results_df is not None and not results_df.empty:
+if results_df is not None and not results_df.empty:
         # ── Metric filter state ──────────────────────────────────────
         if "metric_filter" not in st.session_state:
             st.session_state.metric_filter = None
