@@ -329,7 +329,7 @@ def save_results_to_sheet(results):
         rows = [RESULTS_COLUMNS]
         for r in results:
             rows.append([str(r.get(col, "")) for col in RESULTS_COLUMNS])
-        ws.update(f"A1:I{len(rows)}", rows)
+        ws.update("A1", rows)
     except Exception:
         # Fall back to local file
         with open(RESULTS_FILE, "w") as f:
@@ -354,25 +354,33 @@ def load_results_from_sheet():
         return None
 
 
+def _apply_result_defaults(df):
+    for col, default in [("category", "Other"), ("confidence", 0), ("support_person", "Unknown"),
+                          ("l2_engineer", "None"), ("l2_involvement", "None"), ("shortcut_url", ""), ("created_at", ""), ("state", "")]:
+        if col not in df.columns:
+            df[col] = default
+    return df
+
+
 def load_results():
-    """Load results from Google Sheet, falling back to local file."""
-    df = load_results_from_sheet()
-    if df is not None and not df.empty:
-        for col, default in [("category", "Other"), ("confidence", 0), ("support_person", "Unknown"),
-                              ("l2_engineer", "None"), ("l2_involvement", "None"), ("shortcut_url", ""), ("created_at", ""), ("state", "")]:
-            if col not in df.columns:
-                df[col] = default
-        return df
-    # Fallback to local file
+    """Load results from Google Sheet or local file, preferring whichever has more data."""
+    sheet_df = load_results_from_sheet()
+    local_df = None
     if os.path.exists(RESULTS_FILE):
-        with open(RESULTS_FILE) as f:
-            data = json.load(f)
-        df = pd.DataFrame(data)
-        for col, default in [("category", "Other"), ("confidence", 0), ("support_person", "Unknown"),
-                              ("l2_engineer", "None"), ("l2_involvement", "None"), ("shortcut_url", ""), ("created_at", ""), ("state", "")]:
-            if col not in df.columns:
-                df[col] = default
-        return df
+        try:
+            with open(RESULTS_FILE) as f:
+                data = json.load(f)
+            local_df = pd.DataFrame(data)
+        except Exception:
+            pass
+
+    sheet_count = len(sheet_df) if sheet_df is not None and not sheet_df.empty else 0
+    local_count = len(local_df) if local_df is not None and not local_df.empty else 0
+
+    if local_count > sheet_count:
+        return _apply_result_defaults(local_df)
+    if sheet_count > 0:
+        return _apply_result_defaults(sheet_df)
     return None
 
 
