@@ -125,6 +125,7 @@ Respond with ONLY valid JSON in this exact format (no markdown, no code fences):
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_FILE = os.path.join(APP_DIR, "l2_results.json")
 OVERRIDES_FILE = os.path.join(APP_DIR, "l2_overrides.json")
+L2_TAG_OVERRIDES_FILE = os.path.join(APP_DIR, "l2_tag_overrides.json")
 HISTORY_DIR = os.path.join(APP_DIR, "history")
 PROGRESS_FILE = os.path.join(APP_DIR, "analysis_progress.json")
 
@@ -411,6 +412,23 @@ def save_overrides(overrides):
             ws.update(f"A1:E{len(rows)}", rows)
     except Exception:
         pass
+
+
+def load_l2_tag_overrides():
+    """Load manual L2 tag overrides from local file. Returns dict: name → {l2_engineer, l2_involvement}."""
+    if os.path.exists(L2_TAG_OVERRIDES_FILE):
+        try:
+            with open(L2_TAG_OVERRIDES_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return {}
+
+
+def save_l2_tag_overrides(tag_overrides):
+    """Persist manual L2 tag overrides to local file."""
+    with open(L2_TAG_OVERRIDES_FILE, "w") as f:
+        json.dump(tag_overrides, f, indent=2)
 
 
 def save_history_snapshot(results):
@@ -700,7 +718,12 @@ with tab1:
                 f"Sheet columns: {list(sheet_df_live.columns)}"
             )
 
-    # Also patch results_df so the ticket table shows correct L2 values
+    # Apply manual tag overrides on top of sheet-parsed values
+    l2_tag_overrides = load_l2_tag_overrides()
+    for tname, ov in l2_tag_overrides.items():
+        live_map[tname] = (ov.get("l2_involvement", "None"), ov.get("l2_engineer", "None"))
+
+    # Re-patch results_df with overrides applied
     if results_df is not None and not results_df.empty and live_map:
         results_df["l2_involvement"] = results_df["name"].map(
             lambda n: live_map.get(n, ("None", "None"))[0]
@@ -1225,19 +1248,10 @@ with tab1:
                         key=f"tag_inv_{selected}",
                     )
                 if st.button("Save L2 Tag", key=f"save_tag_{selected}"):
-                    # Load current results, update, and save to sheet + local
-                    all_results = []
-                    if os.path.exists(RESULTS_FILE):
-                        with open(RESULTS_FILE) as f:
-                            all_results = json.load(f)
-                    for r in all_results:
-                        if r["name"] == selected:
-                            r["l2_engineer"] = tag_engineer
-                            r["l2_involvement"] = tag_involvement
-                            break
-                    save_results_to_sheet(all_results)
-                    with open(RESULTS_FILE, "w") as f:
-                        json.dump(all_results, f, indent=2)
+                    # Save to override file so it persists across sheet re-parses
+                    _tag_ovs = load_l2_tag_overrides()
+                    _tag_ovs[selected] = {"l2_engineer": tag_engineer, "l2_involvement": tag_involvement}
+                    save_l2_tag_overrides(_tag_ovs)
                     st.success(f"Saved: {tag_engineer} — {tag_involvement}")
                     st.rerun()
 
