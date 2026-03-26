@@ -741,7 +741,7 @@ with tab1:
     avg_l2_level        = (sum(int(inv[0]) for inv, _ in _tagged if inv[0].isdigit()) / l2_involved_count
                            if l2_involved_count > 0 else 0)
 
-if results_df is not None and not results_df.empty:
+    if results_df is not None and not results_df.empty:
         # ── Metric filter state ──────────────────────────────────────
         if "metric_filter" not in st.session_state:
             st.session_state.metric_filter = None
