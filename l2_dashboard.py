@@ -905,15 +905,6 @@ with tab1:
                 st.session_state.metric_filter = ("l2_level", "1")
                 st.rerun()
 
-        # ── Gap analysis ──────────────────────────────────────────────
-        if len(could_but_didnt_df) > 0:
-            gap_col1, gap_col2 = st.columns([5, 1])
-            with gap_col1:
-                st.info(f"**Gap:** {len(could_but_didnt_df)} tickets L2 *could* have supported but had no L2 involvement")
-            with gap_col2:
-                if st.button("↓ drill down", key="btn_gap", use_container_width=True):
-                    st.session_state.metric_filter = ("gap", "could_but_didnt")
-                    st.rerun()
 
         # ── Active filter indicator ──────────────────────────────────
         if st.session_state.metric_filter is not None:
