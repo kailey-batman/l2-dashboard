@@ -228,19 +228,38 @@ def parse_shortcut_activity_for_l2(shortcut_activity):
     if not shortcut_activity:
         return "None", "None"
 
-    # Match "changed ... → L2 Support Level: DIGIT" or "set L2 Support Level: DIGIT"
-    pattern = re.compile(
-        r'\[(\d{4}-\d{2}-\d{2}T[\d:.Z]+)\]\s+([^—\n]+?)\s*—\s*update story\s+'
-        r'(?:changed .+?→\s*L2 Support Level:\s*|set L2 Support Level:\s*)(\d)',
-        re.IGNORECASE,
-    )
+    l2_level_map = {
+        "5": "5 - Independent Resolution",
+        "4": "4 - Near-Complete (Assisted)",
+        "3": "3 - Framework Provided",
+        "2": "2 - Technical Enrichment",
+        "1": "1 - Escalated (No Context)",
+    }
 
     matches = []
+
+    # Strategy 1: full structured match with timestamp + person
+    # Tolerates em-dash (—), en-dash (–), or hyphen-minus (-) as separator
+    # Tolerates → or -> as arrow
+    pattern = re.compile(
+        r'\[(\d{4}-\d{2}-\d{2}T[\d:.Z]+)\]\s+([^\u2014\u2013\-\n]+?)\s*[\u2014\u2013]\s*'
+        r'update story\s+(?:changed .+?(?:\u2192|->)\s*L2 Support Level:\s*|set L2 Support Level:\s*)(\d)',
+        re.IGNORECASE,
+    )
     for m in pattern.finditer(shortcut_activity):
-        timestamp_str = m.group(1)
-        person = m.group(2).strip()
-        level_num = m.group(3)
-        matches.append((timestamp_str, person, level_num))
+        matches.append((m.group(1), m.group(2).strip(), m.group(3)))
+
+    # Strategy 2: simpler fallback — just find any "L2 Support Level: DIGIT" with a person name nearby
+    if not matches:
+        simple = re.compile(
+            r'\[(\d{4}-\d{2}-\d{2}T[\d:.Z]+)\]\s+(\S[^\[\n]*?)\s*[\u2014\u2013\-]{1,3}\s*.*?L2 Support Level:\s*(\d)',
+            re.IGNORECASE,
+        )
+        for m in simple.finditer(shortcut_activity):
+            # Only include lines that are actually setting/changing L2 level
+            line = shortcut_activity[m.start():shortcut_activity.find('\n', m.start()) if '\n' in shortcut_activity[m.start():] else m.end() + 200]
+            if 'l2 support level' in line.lower():
+                matches.append((m.group(1), m.group(2).strip(), m.group(3)))
 
     if not matches:
         return "None", "None"
@@ -249,13 +268,6 @@ def parse_shortcut_activity_for_l2(shortcut_activity):
     matches.sort(key=lambda x: x[0])
     _, person, level_num = matches[-1]
 
-    l2_level_map = {
-        "5": "5 - Independent Resolution",
-        "4": "4 - Near-Complete (Assisted)",
-        "3": "3 - Framework Provided",
-        "2": "2 - Technical Enrichment",
-        "1": "1 - Escalated (No Context)",
-    }
     l2_involvement = l2_level_map.get(level_num, f"{level_num} - Unknown")
 
     person_lower = person.lower()
@@ -495,7 +507,7 @@ def run_analysis_background(rows, existing_results, rerun_all):
             desc = row.get("description", "").strip()
             intercom_transcript = (row.get("Intercom Transcription", "") or row.get("Intercom Transcript", "")).strip()
             slack_transcript = (row.get("Slack Transcript", "") or row.get("Slack Conversation Transcript", "")).strip()
-            shortcut_activity = row.get("Shortcut Ticket Activity", "").strip()
+            shortcut_activity = (row.get("Shortcut Activity Export", "") or row.get("Shortcut Ticket Activity", "")).strip()
 
             set_analysis_progress(i + 1, len(new_rows), name)
 
@@ -681,6 +693,73 @@ with tab1:
     results_df = load_results()
     overrides = load_overrides()
 
+    # ── Build live L2 data from ALL sheet rows ───────────────────────
+    # Parse Shortcut activity across all 682 tickets so L2 level/engineer
+    # metrics reflect every ticket Jayson/Sean has tagged, whether or not
+    # that ticket has been through the AI analysis yet.
+    sheet_df_live = load_google_sheet()
+    live_map = {}  # name → (l2_involvement, l2_engineer) for all sheet rows
+    _live_map_ready = False
+    if sheet_df_live is not None:
+        activity_col = next(
+            (c for c in sheet_df_live.columns if "activity" in c.lower()),
+            None,
+        )
+        name_col = next((c for c in sheet_df_live.columns if c.lower() == "name"), None)
+        if activity_col and name_col:
+            for _, sr in sheet_df_live.iterrows():
+                tname = str(sr.get(name_col, "")).strip()
+                activity_text = str(sr.get(activity_col, "")).strip()
+                if tname:
+                    live_map[tname] = parse_shortcut_activity_for_l2(activity_text)
+            _live_map_ready = True
+        else:
+            st.warning(
+                f"Could not find the Shortcut activity column. "
+                f"Sheet columns: {list(sheet_df_live.columns)}"
+            )
+
+    # Also patch results_df so the ticket table shows correct L2 values
+    if results_df is not None and not results_df.empty and live_map:
+        results_df["l2_involvement"] = results_df["name"].map(
+            lambda n: live_map.get(n, ("None", "None"))[0]
+        ).fillna("None")
+        results_df["l2_engineer"] = results_df["name"].map(
+            lambda n: live_map.get(n, ("None", "None"))[1]
+        ).fillna("None")
+
+    # Pre-compute L2 stats from ALL sheet tickets (not just analyzed ones)
+    _tagged = [(inv, eng) for inv, eng in live_map.values() if inv != "None"]
+    l2_involved_count   = len(_tagged)
+    sean_count          = sum(1 for _, eng in _tagged if eng == "Sean")
+    jayson_count        = sum(1 for _, eng in _tagged if eng == "Jayson")
+    l2_level_5_count    = sum(1 for inv, _ in _tagged if inv.startswith("5"))
+    l2_level_4_count    = sum(1 for inv, _ in _tagged if inv.startswith("4"))
+    l2_level_3_count    = sum(1 for inv, _ in _tagged if inv.startswith("3"))
+    l2_level_2_count    = sum(1 for inv, _ in _tagged if inv.startswith("2"))
+    l2_level_1_count    = sum(1 for inv, _ in _tagged if inv.startswith("1"))
+    avg_l2_level        = (sum(int(inv[0]) for inv, _ in _tagged if inv[0].isdigit()) / l2_involved_count
+                           if l2_involved_count > 0 else 0)
+
+    # ── Debug: show what the sheet parser found ──────────────────────
+    with st.expander("🔍 L2 Debug Info", expanded=True):
+        st.write(f"**Sheet loaded:** {sheet_df_live is not None}")
+        if sheet_df_live is not None:
+            st.write(f"**Sheet rows:** {len(sheet_df_live)}")
+            st.write(f"**Sheet columns:** {list(sheet_df_live.columns)}")
+            activity_col_dbg = next((c for c in sheet_df_live.columns if "activity" in c.lower()), None)
+            name_col_dbg = next((c for c in sheet_df_live.columns if c.lower() == "name"), None)
+            st.write(f"**Activity column found:** {activity_col_dbg}")
+            st.write(f"**Name column found:** {name_col_dbg}")
+            if activity_col_dbg and name_col_dbg:
+                sample_activity = str(sheet_df_live.iloc[0].get(activity_col_dbg, ""))
+                st.write(f"**Sample activity (row 0, first 300 chars):** `{sample_activity[:300]}`")
+        st.write(f"**live_map size:** {len(live_map)}")
+        st.write(f"**Tickets with L2 data:** {l2_involved_count}")
+        if live_map:
+            sample_tagged = [(k, v) for k, v in live_map.items() if v[0] != "None"][:5]
+            st.write(f"**First 5 tagged:** {sample_tagged}")
+
     if results_df is not None and not results_df.empty:
         # ── Metric filter state ──────────────────────────────────────
         if "metric_filter" not in st.session_state:
@@ -694,14 +773,6 @@ with tab1:
         insufficient = len(results_df[results_df["decision"] == "Insufficient Data"])
         avg_conf = results_df[results_df["decision"] != "Insufficient Data"]["confidence"].mean() if "confidence" in results_df.columns else 0
 
-        l2_involved = results_df[results_df["l2_involvement"] != "None"]
-        l2_level_5 = results_df[results_df["l2_involvement"].str.startswith("5", na=False)]
-        l2_level_4 = results_df[results_df["l2_involvement"].str.startswith("4", na=False)]
-        l2_level_3 = results_df[results_df["l2_involvement"].str.startswith("3", na=False)]
-        l2_level_2 = results_df[results_df["l2_involvement"].str.startswith("2", na=False)]
-        l2_level_1 = results_df[results_df["l2_involvement"].str.startswith("1", na=False)]
-        sean_tickets = results_df[results_df["l2_engineer"] == "Sean"]
-        jayson_tickets = results_df[results_df["l2_engineer"] == "Jayson"]
         could_but_didnt_df = results_df[
             (results_df["decision"] == "L2 Can Support") &
             (results_df["l2_involvement"] == "None")
@@ -797,61 +868,58 @@ with tab1:
             html = html.replace("&#8595; drill down", "")
             st.markdown(html, unsafe_allow_html=True)
 
-        # ── Row 2: L2 Engineer Involvement ───────────────────────────
+        # ── Row 2: L2 Engineer Involvement (from all 682 sheet rows) ──
         st.markdown("**L2 Engineer Involvement**")
         l2_r1c1, l2_r1c2, l2_r1c3, l2_r1c4 = st.columns(4)
 
         with l2_r1c1:
-            pct = f"{len(l2_involved)/total*100:.0f}%" if total > 0 else "0%"
-            st.markdown(metric_card_html("L2 Involved", len(l2_involved), delta=pct), unsafe_allow_html=True)
+            sheet_total = len(sheet_df_live) if sheet_df_live is not None else total
+            pct = f"{l2_involved_count/sheet_total*100:.0f}%" if sheet_total > 0 else "0%"
+            st.markdown(metric_card_html("L2 Involved", l2_involved_count, delta=pct), unsafe_allow_html=True)
             if st.button("x", key="btn_l2_involved", use_container_width=True):
                 st.session_state.metric_filter = ("l2_involvement", "!=None")
                 st.rerun()
         with l2_r1c2:
-            st.markdown(metric_card_html("Sean", len(sean_tickets)), unsafe_allow_html=True)
+            st.markdown(metric_card_html("Sean", sean_count), unsafe_allow_html=True)
             if st.button("x", key="btn_sean", use_container_width=True):
                 st.session_state.metric_filter = ("l2_engineer", "Sean")
                 st.rerun()
         with l2_r1c3:
-            st.markdown(metric_card_html("Jayson", len(jayson_tickets)), unsafe_allow_html=True)
+            st.markdown(metric_card_html("Jayson", jayson_count), unsafe_allow_html=True)
             if st.button("x", key="btn_jayson", use_container_width=True):
                 st.session_state.metric_filter = ("l2_engineer", "Jayson")
                 st.rerun()
         with l2_r1c4:
-            avg_level = 0
-            if len(l2_involved) > 0:
-                levels = l2_involved["l2_involvement"].str[0].apply(pd.to_numeric, errors="coerce").dropna()
-                avg_level = levels.mean() if len(levels) > 0 else 0
-            html = metric_card_html("Avg L2 Level", f"{avg_level:.1f}/5")
+            html = metric_card_html("Avg L2 Level", f"{avg_l2_level:.1f}/5")
             html = html.replace("&#8595; drill down", "")
             st.markdown(html, unsafe_allow_html=True)
 
-        # ── Row 3: L2 Support Levels ──────────────────────────────────
+        # ── Row 3: L2 Support Levels (from all 682 sheet rows) ────────
         st.markdown("**L2 Support Levels**")
         lv1, lv2, lv3, lv4, lv5 = st.columns(5)
 
         with lv1:
-            st.markdown(metric_card_html("5 - Independent", len(l2_level_5)), unsafe_allow_html=True)
+            st.markdown(metric_card_html("5 - Independent", l2_level_5_count), unsafe_allow_html=True)
             if st.button("x", key="btn_lv5", use_container_width=True):
                 st.session_state.metric_filter = ("l2_level", "5")
                 st.rerun()
         with lv2:
-            st.markdown(metric_card_html("4 - Near-Complete", len(l2_level_4)), unsafe_allow_html=True)
+            st.markdown(metric_card_html("4 - Near-Complete", l2_level_4_count), unsafe_allow_html=True)
             if st.button("x", key="btn_lv4", use_container_width=True):
                 st.session_state.metric_filter = ("l2_level", "4")
                 st.rerun()
         with lv3:
-            st.markdown(metric_card_html("3 - Framework", len(l2_level_3)), unsafe_allow_html=True)
+            st.markdown(metric_card_html("3 - Framework", l2_level_3_count), unsafe_allow_html=True)
             if st.button("x", key="btn_lv3", use_container_width=True):
                 st.session_state.metric_filter = ("l2_level", "3")
                 st.rerun()
         with lv4:
-            st.markdown(metric_card_html("2 - Enrichment", len(l2_level_2)), unsafe_allow_html=True)
+            st.markdown(metric_card_html("2 - Enrichment", l2_level_2_count), unsafe_allow_html=True)
             if st.button("x", key="btn_lv2", use_container_width=True):
                 st.session_state.metric_filter = ("l2_level", "2")
                 st.rerun()
         with lv5:
-            st.markdown(metric_card_html("1 - Escalated", len(l2_level_1)), unsafe_allow_html=True)
+            st.markdown(metric_card_html("1 - Escalated", l2_level_1_count), unsafe_allow_html=True)
             if st.button("x", key="btn_lv1", use_container_width=True):
                 st.session_state.metric_filter = ("l2_level", "1")
                 st.rerun()
