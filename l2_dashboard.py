@@ -511,7 +511,7 @@ def run_analysis_background(rows, existing_results, rerun_all):
     """Run analysis in a background thread, saving results to Google Sheets."""
     try:
         client = Anthropic()
-        analyzed_names = {r["name"] for r in existing_results}
+        analyzed_names = {r["name"].strip() for r in existing_results}
 
         if rerun_all:
             new_rows = rows
@@ -1380,9 +1380,6 @@ with tab2:
                 st.error("No file provided.")
 
             if rows:
-                if max_rows > 0:
-                    rows = rows[:max_rows]
-
                 # Load existing results from sheet (or local fallback)
                 existing_results = []
                 if not rerun_all:
@@ -1390,12 +1387,17 @@ with tab2:
                     if df_existing is not None and not df_existing.empty:
                         existing_results = df_existing.to_dict("records")
 
-                # Check how many are new
-                analyzed_names = {r["name"] for r in existing_results}
+                # Check how many are new — apply max_rows AFTER filtering so bottom rows aren't excluded
+                analyzed_names = {r["name"].strip() for r in existing_results}
                 if rerun_all:
-                    new_count = len(rows)
+                    rows_to_analyze = rows[:max_rows] if max_rows > 0 else rows
+                    new_count = len(rows_to_analyze)
                 else:
-                    new_count = sum(1 for r in rows if r.get("name", "").strip() not in analyzed_names)
+                    new_rows = [r for r in rows if r.get("name", "").strip() not in analyzed_names]
+                    if max_rows > 0:
+                        new_rows = new_rows[:max_rows]
+                    new_count = len(new_rows)
+                    rows_to_analyze = [r for r in rows if r.get("name", "").strip() in analyzed_names] + new_rows
 
                 if new_count == 0 and not rerun_all:
                     st.info("All tickets have already been analyzed. Check 'Re-analyze all' to rerun.")
@@ -1404,7 +1406,7 @@ with tab2:
                     set_analysis_progress(0, new_count, "Starting...", status="running")
                     thread = threading.Thread(
                         target=run_analysis_background,
-                        args=(rows, existing_results, rerun_all),
+                        args=(rows_to_analyze, existing_results, rerun_all),
                         daemon=True,
                     )
                     thread.start()
