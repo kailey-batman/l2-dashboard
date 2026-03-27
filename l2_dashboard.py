@@ -17,6 +17,7 @@ from google.oauth2.service_account import Credentials
 import threading
 import re
 import plotly.graph_objects as go
+from streamlit_autorefresh import st_autorefresh
 
 # ── L2 Supported Capabilities ──────────────────────────────────────────────
 L2_CAPABILITIES = """
@@ -283,6 +284,25 @@ def parse_shortcut_activity_for_l2(shortcut_activity):
     return l2_involvement, l2_engineer
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _build_live_map_from_sheet(sheet_df):
+    """Parse Shortcut activity from every sheet row and return a name→(involvement, engineer) dict.
+    Cached so the expensive iterrows + regex run only once per 60s, not on every render."""
+    live_map = {}
+    if sheet_df is None:
+        return live_map, None
+    activity_col = next((c for c in sheet_df.columns if "activity" in c.lower()), None)
+    name_col = next((c for c in sheet_df.columns if c.lower() == "name"), None)
+    if not activity_col or not name_col:
+        return live_map, f"Could not find the Shortcut activity column. Sheet columns: {list(sheet_df.columns)}"
+    for _, sr in sheet_df.iterrows():
+        tname = str(sr.get(name_col, "")).strip()
+        activity_text = str(sr.get(activity_col, "")).strip()
+        if tname:
+            live_map[tname] = parse_shortcut_activity_for_l2(activity_text)
+    return live_map, None
+
+
 def color_decision(val):
     if val == "L2 Can Support":
         return "background-color: #0a3d1f; color: #00E676"
@@ -336,6 +356,7 @@ def save_results_to_sheet(results):
             json.dump(results, f, indent=2)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def load_results_from_sheet():
     """Load results from the Results tab in Google Sheets."""
     try:
@@ -387,6 +408,7 @@ def load_results():
 OVERRIDES_COLUMNS = ["name", "corrected_decision", "reason", "timestamp", "original_decision"]
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def load_overrides():
     """Load overrides from Google Sheet, falling back to local file."""
     try:
@@ -420,6 +442,7 @@ def save_overrides(overrides):
             ws.update(f"A1:E{len(rows)}", rows)
     except Exception:
         pass
+    load_overrides.clear()
 
 
 def load_l2_tag_overrides():
@@ -681,8 +704,8 @@ if analysis_progress and analysis_progress.get("status") == "running":
     </div>
     """, unsafe_allow_html=True)
     st.progress(prog_pct)
-    # Auto-refresh every 3 seconds to update progress
-    st.markdown("""<meta http-equiv="refresh" content="3">""", unsafe_allow_html=True)
+    # Soft rerun every 3 seconds — no full page reload, no flash
+    st_autorefresh(interval=3000, key="analysis_refresh")
 elif analysis_progress and analysis_progress.get("status") == "complete":
     prog_total = analysis_progress.get("total", 0)
     if prog_total > 0:
@@ -705,26 +728,10 @@ with tab1:
     # metrics reflect every ticket Jayson/Sean has tagged, whether or not
     # that ticket has been through the AI analysis yet.
     sheet_df_live = load_google_sheet()
-    live_map = {}  # name → (l2_involvement, l2_engineer) for all sheet rows
-    _live_map_ready = False
-    if sheet_df_live is not None:
-        activity_col = next(
-            (c for c in sheet_df_live.columns if "activity" in c.lower()),
-            None,
-        )
-        name_col = next((c for c in sheet_df_live.columns if c.lower() == "name"), None)
-        if activity_col and name_col:
-            for _, sr in sheet_df_live.iterrows():
-                tname = str(sr.get(name_col, "")).strip()
-                activity_text = str(sr.get(activity_col, "")).strip()
-                if tname:
-                    live_map[tname] = parse_shortcut_activity_for_l2(activity_text)
-            _live_map_ready = True
-        else:
-            st.warning(
-                f"Could not find the Shortcut activity column. "
-                f"Sheet columns: {list(sheet_df_live.columns)}"
-            )
+    live_map, _live_map_err = _build_live_map_from_sheet(sheet_df_live)
+    _live_map_ready = bool(live_map)
+    if _live_map_err:
+        st.warning(_live_map_err)
 
     # Apply manual tag overrides on top of sheet-parsed values
     l2_tag_overrides = load_l2_tag_overrides()

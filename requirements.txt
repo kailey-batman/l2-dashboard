@@ -4,3 +4,4 @@ anthropic
 gspread
 google-auth
 plotly
+streamlit-autorefresh
