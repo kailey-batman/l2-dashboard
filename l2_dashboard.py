@@ -703,6 +703,9 @@ def _show_login_page():
     if "_auth_error" in st.session_state:
         st.error(st.session_state.pop("_auth_error"))
 
+    # Temporary debug — remove once auth is working
+    st.caption(f"Client ID (debug): `{client_id[:30]}…` (len={len(client_id)})")
+
     auth_url = _build_auth_url()
 
     logo_html = ""
