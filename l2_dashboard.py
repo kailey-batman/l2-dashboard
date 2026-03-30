@@ -621,10 +621,16 @@ def _get_oauth_creds():
     return client_id, client_secret, redirect_uri
 
 
+# Server-side state store — survives the new WebSocket session on OAuth redirect
+_pending_oauth_states: set = set()
+_oauth_states_lock = threading.Lock()
+
+
 def _build_auth_url():
     client_id, _, redirect_uri = _get_oauth_creds()
     state = secrets.token_urlsafe(32)
-    st.session_state["_oauth_state"] = state
+    with _oauth_states_lock:
+        _pending_oauth_states.add(state)
     params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
@@ -639,9 +645,10 @@ def _build_auth_url():
 
 def _exchange_code(code, state):
     """Exchange OAuth code for user info. Returns (user_dict, error_str)."""
-    expected = st.session_state.get("_oauth_state")
-    if not expected or state != expected:
-        return None, "Invalid OAuth state. Please try logging in again."
+    with _oauth_states_lock:
+        if state not in _pending_oauth_states:
+            return None, "Invalid OAuth state. Please try logging in again."
+        _pending_oauth_states.discard(state)
 
     client_id, client_secret, redirect_uri = _get_oauth_creds()
     try:
@@ -689,6 +696,9 @@ def _show_login_page():
             "GOOGLE_OAUTH_REDIRECT_URI environment variables."
         )
         return
+
+    if "_auth_error" in st.session_state:
+        st.error(st.session_state.pop("_auth_error"))
 
     auth_url = _build_auth_url()
 
@@ -850,7 +860,7 @@ if "code" in _qp and "state" in _qp:
     with st.spinner("Signing you in…"):
         _user, _err = _exchange_code(_qp["code"], _qp["state"])
     if _err:
-        st.error(_err)
+        st.session_state["_auth_error"] = _err
     else:
         st.session_state["_auth_user"] = _user
         _log_visit(_user)
