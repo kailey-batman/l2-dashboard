@@ -22,7 +22,6 @@ from google.oauth2.service_account import Credentials
 import threading
 import re
 import plotly.graph_objects as go
-import extra_streamlit_components as stx
 from streamlit_autorefresh import st_autorefresh
 
 # ── L2 Supported Capabilities ──────────────────────────────────────────────
@@ -610,12 +609,33 @@ def run_analysis_background(rows, existing_results, rerun_all):
 
 
 # ── Google OAuth Authentication ─────────────────────────────────────────────
-_AUTH_COOKIE = "fg_auth"
+import streamlit.components.v1 as _stc
+
+_AUTH_COOKIE = "fg_l2_auth"
 _COOKIE_TTL_HOURS = 24
 
 
-def _cookie_mgr():
-    return stx.CookieManager(key="_fg_cookie_mgr")
+def _set_auth_cookie(user_info):
+    encoded = _encode_auth(user_info)
+    max_age = _COOKIE_TTL_HOURS * 3600
+    _stc.html(
+        f'<script>document.cookie="{_AUTH_COOKIE}={encoded}; path=/; max-age={max_age}; SameSite=Lax";</script>',
+        height=0,
+    )
+
+
+def _clear_auth_cookie():
+    _stc.html(
+        f'<script>document.cookie="{_AUTH_COOKIE}=; path=/; max-age=0";</script>',
+        height=0,
+    )
+
+
+def _read_auth_cookie():
+    try:
+        return st.context.cookies.get(_AUTH_COOKIE)
+    except Exception:
+        return None
 
 
 def _encode_auth(user):
@@ -849,39 +869,33 @@ def _load_access_log():
 # ── Page Config ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Escalation Tracker", page_icon="logo.svg", layout="wide")
 
-# ── Cookie manager (must render on every run) ────────────────────────────────
-_cookies = _cookie_mgr()
-
 # ── Restore session from cookie ──────────────────────────────────────────────
 if not st.session_state.get("_auth_user"):
-    _cookie_val = _cookies.get(_AUTH_COOKIE)
+    _cookie_val = _read_auth_cookie()
     if _cookie_val:
         _restored = _decode_auth(_cookie_val)
         if _restored:
             st.session_state["_auth_user"] = _restored
-    elif not st.session_state.get("_cookie_check_done"):
-        # CookieManager may not have loaded yet on first render — retry once
-        st.session_state["_cookie_check_done"] = True
-        st.rerun()
 
 # ── OAuth callback handler ────────────────────────────────────────────────────
 _qp = st.query_params
-if "code" in _qp and "state" in _qp:
+if "code" in _qp:
     with st.spinner("Signing you in…"):
-        _user, _err = _exchange_code(_qp["code"], _qp["state"])
+        _user, _err = _exchange_code(_qp.get("code", ""), _qp.get("state", ""))
     if _err:
         st.session_state["_auth_error"] = _err
     else:
         st.session_state["_auth_user"] = _user
         _log_visit(_user)
-        _cookies.set(_AUTH_COOKIE, _encode_auth(_user),
-                     expires_at=datetime.now() + timedelta(hours=_COOKIE_TTL_HOURS))
     st.query_params.clear()
     st.rerun()
 
 if not st.session_state.get("_auth_user"):
     _show_login_page()
     st.stop()
+
+# Refresh the auth cookie on every authenticated page load
+_set_auth_cookie(st.session_state["_auth_user"])
 
 # ── Custom CSS ──────────────────────────────────────────────────────────────
 st.markdown("""
@@ -976,7 +990,7 @@ with _col_user:
         st.markdown(f"`{_auth_user.get('email', '')}`")
         if st.button("Sign out", key="_logout_btn", use_container_width=True):
             del st.session_state["_auth_user"]
-            _cookie_mgr().delete(_AUTH_COOKIE)
+            _clear_auth_cookie()
             st.rerun()
 
 # ── Analysis progress banner (file-based, survives refresh) ────────────────
