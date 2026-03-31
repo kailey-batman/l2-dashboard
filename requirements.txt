@@ -6,3 +6,4 @@ google-auth
 plotly
 requests
 extra-streamlit-components>=0.1.60
+streamlit-autorefresh
