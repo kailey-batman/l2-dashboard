@@ -746,6 +746,12 @@ def _show_login_page():
 
     auth_url = _build_auth_url()
 
+    # If user clicked login, redirect via JS (navigates same tab)
+    if st.session_state.get("_do_login"):
+        del st.session_state["_do_login"]
+        _stc.html(f'<script>window.parent.location.href="{auth_url}";</script>', height=0)
+        st.stop()
+
     logo_html = ""
     logo_path = os.path.join(APP_DIR, "logo.svg")
     if os.path.exists(logo_path):
@@ -769,16 +775,6 @@ def _show_login_page():
         .login-card h1 {{ color: #00E676; font-size: 1.7rem; margin: 12px 0 8px 0; }}
         .login-card .login-sub {{ color: #9E9E9E; font-size: 0.95rem; margin-bottom: 12px; }}
         .login-note {{ color: #616a75; font-size: 0.75rem; margin-top: 8px; }}
-        /* Style the Streamlit link button to look like Google Sign-In */
-        .stLinkButton > a {{
-            background-color: #ffffff !important; color: #3c4043 !important;
-            border: 1px solid #dadce0 !important; border-radius: 8px !important;
-            font-weight: 500 !important;
-        }}
-        .stLinkButton > a:hover {{
-            background-color: #f8f9fa !important;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.25) !important;
-        }}
     </style>
     <div class="login-wrapper">
         <div class="login-card">
@@ -791,7 +787,9 @@ def _show_login_page():
 
     _c1, _c2, _c3 = st.columns([1.5, 2, 1.5])
     with _c2:
-        st.link_button("Sign in with Google", auth_url, use_container_width=True)
+        if st.button("Sign in with Google", use_container_width=True, type="primary"):
+            st.session_state["_do_login"] = True
+            st.rerun()
 
     st.markdown('<div class="login-note" style="text-align:center;">Only @fieldguide.io accounts are permitted.</div>', unsafe_allow_html=True)
 
