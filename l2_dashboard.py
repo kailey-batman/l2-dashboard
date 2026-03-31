@@ -689,6 +689,10 @@ def _show_login_page():
     if "_auth_error" in st.session_state:
         st.error(st.session_state.pop("_auth_error"))
 
+    # Temp debug
+    _cid, _, _ruri = _get_oauth_creds()
+    st.caption(f"client_id len={len(_cid)} starts=`{_cid[:20]}` | redirect=`{_ruri}`")
+
     auth_url = _build_auth_url()
 
     logo_html = ""
