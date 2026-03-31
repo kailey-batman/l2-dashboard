@@ -799,7 +799,7 @@ def _show_login_page():
             {logo_html}
             <h1>Escalation Tracker</h1>
             <div class="login-sub">Sign in with your Fieldguide Google account to continue.</div>
-            <a href="{auth_url}" class="google-btn">
+            <a href="{auth_url}" target="_self" class="google-btn">
                 {google_logo_svg}
                 Sign in with Google
             </a>
