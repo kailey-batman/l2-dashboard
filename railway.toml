@@ -2,4 +2,4 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "streamlit run l2_dashboard.py --server.port $PORT --server.headless true --server.address 0.0.0.0"
+startCommand = "streamlit run fr_unified.py --server.port $PORT --server.headless true --server.address 0.0.0.0"
