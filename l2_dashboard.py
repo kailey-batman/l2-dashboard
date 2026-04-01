@@ -1063,6 +1063,41 @@ with tab1:
             lambda n: live_map.get(n, ("None", "None"))[1]
         ).fillna("None")
 
+    # ── Date Range Filter ───────────────────────────────────────────
+    # Parse created_at into proper dates for filtering
+    if results_df is not None and not results_df.empty and "created_at" in results_df.columns:
+        results_df["_parsed_date"] = pd.to_datetime(results_df["created_at"], errors="coerce")
+
+    date_col1, date_col2, date_col3 = st.columns([1, 1, 1])
+    _has_dates = (results_df is not None and not results_df.empty
+                  and "_parsed_date" in results_df.columns
+                  and results_df["_parsed_date"].notna().any())
+    if _has_dates:
+        _min_date = results_df["_parsed_date"].min().date()
+        _max_date = results_df["_parsed_date"].max().date()
+    else:
+        _min_date = datetime.now().date() - timedelta(days=365)
+        _max_date = datetime.now().date()
+
+    with date_col1:
+        start_date = st.date_input("Start date", value=_min_date, min_value=_min_date, max_value=_max_date, key="results_start_date")
+    with date_col2:
+        end_date = st.date_input("End date", value=_max_date, min_value=_min_date, max_value=_max_date, key="results_end_date")
+    with date_col3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Reset dates", key="reset_dates"):
+            st.session_state.results_start_date = _min_date
+            st.session_state.results_end_date = _max_date
+            st.rerun()
+
+    # Apply date filter to results_df
+    if results_df is not None and not results_df.empty and _has_dates:
+        date_mask = (
+            (results_df["_parsed_date"].dt.date >= start_date) &
+            (results_df["_parsed_date"].dt.date <= end_date)
+        ) | results_df["_parsed_date"].isna()
+        results_df = results_df[date_mask].copy()
+
     # Pre-compute L2 stats from ALL sheet tickets (not just analyzed ones)
     _tagged = [(inv, eng) for inv, eng in live_map.values() if inv != "None"]
     l2_involved_count   = len(_tagged)
@@ -1756,6 +1791,39 @@ with tab3:
             trends_df["confidence"] = 0
         if "support_person" not in trends_df.columns:
             trends_df["support_person"] = "Unknown"
+
+        # ── Date Range Filter (synced with Results tab) ───────────
+        if "created_at" in trends_df.columns:
+            trends_df["_parsed_date"] = pd.to_datetime(trends_df["created_at"], errors="coerce")
+
+        t_date_col1, t_date_col2, t_date_col3 = st.columns([1, 1, 1])
+        _t_has_dates = ("_parsed_date" in trends_df.columns and trends_df["_parsed_date"].notna().any())
+        if _t_has_dates:
+            _t_min_date = trends_df["_parsed_date"].min().date()
+            _t_max_date = trends_df["_parsed_date"].max().date()
+        else:
+            _t_min_date = datetime.now().date() - timedelta(days=365)
+            _t_max_date = datetime.now().date()
+
+        with t_date_col1:
+            t_start_date = st.date_input("Start date", value=_t_min_date, min_value=_t_min_date, max_value=_t_max_date, key="trends_start_date")
+        with t_date_col2:
+            t_end_date = st.date_input("End date", value=_t_max_date, min_value=_t_min_date, max_value=_t_max_date, key="trends_end_date")
+        with t_date_col3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Reset dates", key="trends_reset_dates"):
+                st.session_state.trends_start_date = _t_min_date
+                st.session_state.trends_end_date = _t_max_date
+                st.rerun()
+
+        if _t_has_dates:
+            t_date_mask = (
+                (trends_df["_parsed_date"].dt.date >= t_start_date) &
+                (trends_df["_parsed_date"].dt.date <= t_end_date)
+            ) | trends_df["_parsed_date"].isna()
+            trends_df = trends_df[t_date_mask].copy()
+
+        st.divider()
 
         # Exclude insufficient data for most charts
         valid_df = trends_df[trends_df["decision"] != "Insufficient Data"]
