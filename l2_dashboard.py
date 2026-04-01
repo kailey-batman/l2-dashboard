@@ -1507,13 +1507,13 @@ with tab1:
         # ── Pagination arrows below table ──────────────────────────────
         pg_left, pg_info, pg_right = st.columns([1, 2, 1])
         with pg_left:
-            if st.button("< Previous", disabled=(st.session_state.current_page <= 1)):
+            if st.button("← Previous", key="pg_prev", type="primary", disabled=(st.session_state.current_page <= 1)):
                 st.session_state.current_page -= 1
                 st.rerun()
         with pg_info:
             st.markdown(f"<div style='text-align:center; color:#9E9E9E;'>Page {st.session_state.current_page} of {total_pages} &nbsp;|&nbsp; {start_idx+1}-{end_idx} of {len(filtered)} results</div>", unsafe_allow_html=True)
         with pg_right:
-            if st.button("Next >", disabled=(st.session_state.current_page >= total_pages)):
+            if st.button("Next →", key="pg_next", type="primary", disabled=(st.session_state.current_page >= total_pages)):
                 st.session_state.current_page += 1
                 st.rerun()
 
