@@ -2406,6 +2406,55 @@ with tab_chat:
             })
         st.rerun()
 
+    # ── Filtered ticket table ──────────────────────────────────────────
+    if _chat_df is not None and not _chat_df.empty:
+        st.divider()
+        _table_df = _chat_df.copy()
+
+        # Apply active chat filter
+        _cf = st.session_state.get("chat_filter")
+        if _cf is not None:
+            _cf_type = _cf.get("type", "")
+            _cf_val = _cf.get("value", "")
+            if _cf_type == "search":
+                _table_df = _table_df[
+                    _table_df["name"].str.contains(str(_cf_val), case=False, na=False) |
+                    _table_df["description"].str.contains(str(_cf_val), case=False, na=False)
+                ]
+            elif _cf_type == "decision":
+                _table_df = _table_df[_table_df["decision"] == _cf_val]
+            elif _cf_type == "category":
+                _table_df = _table_df[_table_df["category"].str.contains(str(_cf_val), case=False, na=False)]
+            elif _cf_type == "support_person":
+                _table_df = _table_df[_table_df["support_person"].str.contains(str(_cf_val), case=False, na=False)]
+            elif _cf_type == "l2_engineer":
+                _table_df = _table_df[_table_df["l2_engineer"].str.contains(str(_cf_val), case=False, na=False)]
+            elif _cf_type == "l2_level":
+                _table_df = _table_df[_table_df["l2_involvement"].str.startswith(str(_cf_val), na=False)]
+            elif _cf_type == "names" and isinstance(_cf_val, list):
+                _table_df = _table_df[_table_df["name"].isin(_cf_val)]
+
+        # Pick display columns
+        _show_cols = [c for c in ["created_at", "name", "decision", "category", "support_person", "l2_engineer", "l2_involvement"] if c in _table_df.columns]
+        _display_table = _table_df[_show_cols].copy()
+        if "created_at" in _display_table.columns:
+            _display_table["created_at"] = _display_table["created_at"].apply(
+                lambda x: str(x).split(" ")[0] if isinstance(x, str) and " " in x else x
+            )
+
+        _col_config = {
+            "created_at": st.column_config.TextColumn("Date", width="small"),
+            "name": st.column_config.TextColumn("Ticket"),
+            "decision": st.column_config.TextColumn("Decision"),
+            "category": st.column_config.TextColumn("Category"),
+            "support_person": st.column_config.TextColumn("Support"),
+            "l2_engineer": st.column_config.TextColumn("L2 Eng"),
+            "l2_involvement": st.column_config.TextColumn("L2 Level"),
+        }
+
+        st.markdown(f"**Showing {len(_display_table)} tickets**")
+        st.dataframe(_display_table, use_container_width=True, height=400, hide_index=True, column_config=_col_config)
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # TAB 5: GOOGLE SHEET
