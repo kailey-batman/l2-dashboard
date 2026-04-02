@@ -127,6 +127,50 @@ Respond with ONLY valid JSON in this exact format (no markdown, no code fences):
 }}
 """
 
+CHAT_SYSTEM_PROMPT = """You are an AI assistant for the L2 Capability Analyzer dashboard at Fieldguide. You help users explore and understand support ticket data.
+
+You have access to the complete ticket dataset. Use it to answer questions about:
+- Specific tickets or groups of tickets
+- Work done by specific people (support persons, L2 engineers like Sean or Jayson)
+- Trends, patterns, and statistics across tickets
+- Categories, decisions, and L2 involvement levels
+- Whether L2 actually helped on tickets vs customers figuring it out themselves
+
+Key field meanings:
+- **decision**: "L2 Can Support", "L2 Cannot Support", "Partially Supported", or "Insufficient Data"
+- **l2_engineer**: "Sean", "Jayson", or "None" — the L2 engineer who worked on it
+- **l2_involvement**: Level 1-5 scale. 5=Independent Resolution (L2 handled it alone), 4=Near-Complete, 3=Framework Provided, 2=Technical Enrichment, 1=Escalated. "None" means no L2 involvement.
+- **support_person**: The support person who handled the ticket in Intercom
+- **category**: The type of issue (e.g., Account Access Issues, Data Restores, etc.)
+- **confidence**: 1-5 rating of how confident the AI evaluation was
+
+TICKET DATA:
+{ticket_data}
+
+When answering:
+- Be specific — reference actual ticket names, dates, and people
+- Provide counts and statistics when asked about groups
+- For questions like "did they actually help or figure it out themselves", use l2_involvement level: levels 4-5 mean L2 meaningfully resolved it, level 1-2 means it was mostly escalated/minimal help, level 3 is mixed
+- If the user asks to filter, show, or list specific tickets on the Results table, include a FILTER command
+
+To filter the Results table, add this JSON block at the very end of your response (after your text answer):
+<<<FILTER>>>
+{{"type": "filter_type", "value": "filter_value"}}
+<<<END_FILTER>>>
+
+Supported filter types:
+- {{"type": "search", "value": "search term"}} — text search by ticket name/description
+- {{"type": "decision", "value": "L2 Can Support"}} — filter by decision
+- {{"type": "category", "value": "Account Access Issues"}} — filter by category
+- {{"type": "support_person", "value": "Name"}} — filter by support person
+- {{"type": "l2_engineer", "value": "Sean"}} — filter by L2 engineer
+- {{"type": "l2_level", "value": "5"}} — filter by L2 involvement level number
+- {{"type": "names", "value": ["ticket name 1", "ticket name 2", ...]}} — filter to exact ticket names
+- {{"type": "clear"}} — clear all chat filters
+
+Only include the FILTER block when the user explicitly asks to see, show, filter, or list tickets on the table. Don't include it for general analytical questions. When you do filter, briefly mention that you've applied a filter to the Results tab.
+"""
+
 # ── Paths & Config ──────────────────────────────────────────────────────────
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_FILE = os.path.join(APP_DIR, "l2_results.json")
@@ -465,6 +509,27 @@ def save_l2_tag_overrides(tag_overrides):
     """Persist manual L2 tag overrides to local file."""
     with open(L2_TAG_OVERRIDES_FILE, "w") as f:
         json.dump(tag_overrides, f, indent=2)
+
+
+def build_ticket_context(df):
+    """Build a compact text summary of all tickets for the chatbot system prompt."""
+    if df is None or df.empty:
+        return "No ticket data available."
+    rows = []
+    for _, r in df.iterrows():
+        name = str(r.get("name", ""))[:80]
+        date = str(r.get("created_at", ""))[:10]
+        decision = str(r.get("decision", ""))
+        category = str(r.get("category", ""))
+        support = str(r.get("support_person", "Unknown"))
+        engineer = str(r.get("l2_engineer", "None"))
+        involvement = str(r.get("l2_involvement", "None"))
+        conf = str(r.get("confidence", "0"))
+        explanation = str(r.get("explanation", ""))[:200]
+        state = str(r.get("state", ""))
+        rows.append(f"{name}\t{date}\t{state}\t{decision}\t{category}\t{support}\t{engineer}\t{involvement}\t{conf}\t{explanation}")
+    header = "Name\tDate\tState\tDecision\tCategory\tSupport Person\tL2 Engineer\tL2 Involvement\tConfidence\tExplanation"
+    return f"Total tickets: {len(df)}\n{header}\n" + "\n".join(rows)
 
 
 def save_history_snapshot(results):
@@ -1149,11 +1214,11 @@ elif analysis_progress and analysis_progress.get("status") == "complete":
 # ── Tabs ────────────────────────────────────────────────────────────────────
 _admin_mode = _is_admin()
 if _admin_mode:
-    tab1, tab2, tab3, tab5, tab_admin = st.tabs(
-        ["Results", "Run Analysis", "Trends", "Google Sheet", "Admin"]
+    tab1, tab2, tab3, tab_chat, tab5, tab_admin = st.tabs(
+        ["Results", "Run Analysis", "Trends", "Chat", "Google Sheet", "Admin"]
     )
 else:
-    tab1, tab2, tab3, tab5 = st.tabs(["Results", "Run Analysis", "Trends", "Google Sheet"])
+    tab1, tab2, tab3, tab_chat, tab5 = st.tabs(["Results", "Run Analysis", "Trends", "Chat", "Google Sheet"])
     tab_admin = None
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1420,6 +1485,23 @@ with tab1:
                     st.session_state.metric_filter = None
                     st.rerun()
 
+        # ── Active chat filter indicator ─────────────────────────────
+        _cf_active = st.session_state.get("chat_filter")
+        if _cf_active is not None:
+            _cf_t = _cf_active.get("type", "")
+            _cf_v = _cf_active.get("value", "")
+            if _cf_t == "names":
+                _cf_label = f"Chat: {len(_cf_v)} specific tickets"
+            else:
+                _cf_label = f"Chat: {_cf_t} = {_cf_v}"
+            cf_col1, cf_col2 = st.columns([5, 1])
+            with cf_col1:
+                st.info(f"Filtered by chatbot: **{_cf_label}**")
+            with cf_col2:
+                if st.button("Clear Chat Filter", key="btn_clear_chat_filter", use_container_width=True):
+                    st.session_state.chat_filter = None
+                    st.rerun()
+
         # ── Comparison with human labels ────────────────────────────────
         if "human_decision" in results_df.columns or overrides:
             override_count = len(overrides)
@@ -1546,6 +1628,29 @@ with tab1:
                 filtered = filtered[filtered[mf[0]] != "None"]
             else:
                 filtered = filtered[filtered[mf[0]] == mf[1]]
+
+        # Apply chat filter (from chatbot tab)
+        _cf = st.session_state.get("chat_filter")
+        if _cf is not None:
+            _cf_type = _cf.get("type", "")
+            _cf_val = _cf.get("value", "")
+            if _cf_type == "search":
+                filtered = filtered[
+                    filtered["name"].str.contains(str(_cf_val), case=False, na=False) |
+                    filtered["description"].str.contains(str(_cf_val), case=False, na=False)
+                ]
+            elif _cf_type == "decision":
+                filtered = filtered[filtered["decision"] == _cf_val]
+            elif _cf_type == "category":
+                filtered = filtered[filtered["category"].str.contains(str(_cf_val), case=False, na=False)]
+            elif _cf_type == "support_person":
+                filtered = filtered[filtered["support_person"].str.contains(str(_cf_val), case=False, na=False)]
+            elif _cf_type == "l2_engineer":
+                filtered = filtered[filtered["l2_engineer"].str.contains(str(_cf_val), case=False, na=False)]
+            elif _cf_type == "l2_level":
+                filtered = filtered[filtered["l2_involvement"].str.startswith(str(_cf_val), na=False)]
+            elif _cf_type == "names" and isinstance(_cf_val, list):
+                filtered = filtered[filtered["name"].isin(_cf_val)]
 
         if search_query:
             mask = (
@@ -2117,6 +2222,189 @@ with tab3:
             st.info("No historical data yet. Each time you run an analysis, a snapshot is saved here.")
     else:
         st.info("No results yet. Run an analysis first to see charts and trends.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB: CHAT
+# ═══════════════════════════════════════════════════════════════════════════
+with tab_chat:
+    _chat_header_col, _chat_clear_col = st.columns([5, 1])
+    with _chat_header_col:
+        st.subheader("Chat with your ticket data")
+    with _chat_clear_col:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Clear chat", key="clear_chat_btn"):
+            st.session_state.chat_messages = []
+            st.session_state.chat_filter = None
+            st.rerun()
+    st.caption("Ask questions about tickets, people, trends, or say \"show me\" / \"filter\" to update the Results table.")
+
+    # ── Initialize chat state ──────────────────────────────────────────
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+    if "chat_filter" not in st.session_state:
+        st.session_state.chat_filter = None
+
+    # ── Build ticket context ───────────────────────────────────────────
+    _chat_df = load_results()
+    # Merge live L2 data so chat has the same view as Results tab
+    if _chat_df is not None and not _chat_df.empty:
+        _chat_sheet = load_google_sheet()
+        _chat_live, _ = _build_live_map_from_sheet(_chat_sheet)
+        _chat_tag_ovs = load_l2_tag_overrides()
+        for _tn, _ov in _chat_tag_ovs.items():
+            _chat_live[_tn] = (_ov.get("l2_involvement", "None"), _ov.get("l2_engineer", "None"))
+        if _chat_live:
+            _chat_df["l2_involvement"] = _chat_df["name"].map(
+                lambda n: _chat_live.get(n, ("None", "None"))[0]
+            ).fillna("None")
+            _chat_df["l2_engineer"] = _chat_df["name"].map(
+                lambda n: _chat_live.get(n, ("None", "None"))[1]
+            ).fillna("None")
+
+    _ticket_context = build_ticket_context(_chat_df)
+
+    # ── Active chat filter indicator ───────────────────────────────────
+    if st.session_state.chat_filter is not None:
+        cf = st.session_state.chat_filter
+        cf_type = cf.get("type", "")
+        if cf_type == "names":
+            cf_label = f"Chat filter: {len(cf.get('value', []))} specific tickets"
+        elif cf_type == "clear":
+            cf_label = None
+        else:
+            cf_label = f"Chat filter: {cf_type} = {cf.get('value', '')}"
+
+        if cf_label:
+            fcol1, fcol2 = st.columns([5, 1])
+            with fcol1:
+                st.info(f"**{cf_label}** — switch to Results tab to see filtered table")
+            with fcol2:
+                if st.button("Clear", key="chat_clear_filter"):
+                    st.session_state.chat_filter = None
+                    st.rerun()
+
+    # ── Display chat history ───────────────────────────────────────────
+    for msg in st.session_state.chat_messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["display"])
+
+    # ── Chat input ─────────────────────────────────────────────────────
+    if prompt := st.chat_input("Ask about tickets — e.g. 'What tickets has Mirah worked on this week?'"):
+        # Show user message
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        st.session_state.chat_messages.append({"role": "user", "content": prompt, "display": prompt})
+
+        # Build API messages (use content field, not display, to preserve full history)
+        api_messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.chat_messages]
+
+        # Call Claude
+        _chat_filter_applied = False
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                try:
+                    _chat_client = Anthropic()
+                    _chat_response = _chat_client.messages.create(
+                        model="claude-sonnet-4-20250514",
+                        max_tokens=4096,
+                        system=CHAT_SYSTEM_PROMPT.format(ticket_data=_ticket_context),
+                        messages=api_messages,
+                    )
+                    _raw_reply = _chat_response.content[0].text
+
+                    # Parse filter command if present
+                    _filter_match = re.search(r'<<<FILTER>>>\s*(\{.*?\})\s*<<<END_FILTER>>>', _raw_reply, re.DOTALL)
+                    _display_text = re.sub(r'\s*<<<FILTER>>>.*?<<<END_FILTER>>>\s*', '', _raw_reply, flags=re.DOTALL).strip()
+
+                    if _filter_match:
+                        try:
+                            _filter_data = json.loads(_filter_match.group(1))
+                            if _filter_data.get("type") == "clear":
+                                st.session_state.chat_filter = None
+                            else:
+                                st.session_state.chat_filter = _filter_data
+                            _chat_filter_applied = True
+                        except json.JSONDecodeError:
+                            pass
+
+                    st.markdown(_display_text)
+                    st.session_state.chat_messages.append({
+                        "role": "assistant",
+                        "content": _raw_reply,
+                        "display": _display_text,
+                    })
+
+                except Exception as e:
+                    err_msg = f"Error getting response: {e}"
+                    st.error(err_msg)
+                    st.session_state.chat_messages.append({
+                        "role": "assistant",
+                        "content": err_msg,
+                        "display": err_msg,
+                    })
+
+        # Rerun to update filter indicator if a filter was applied
+        if _chat_filter_applied:
+            st.rerun()
+
+    # ── Starter prompts ────────────────────────────────────────────────
+    if not st.session_state.chat_messages:
+        st.markdown("---")
+        st.markdown("**Try asking:**")
+        starter_cols = st.columns(2)
+        with starter_cols[0]:
+            if st.button("What are the most common ticket categories?", key="starter_1", use_container_width=True):
+                st.session_state._chat_starter = "What are the most common ticket categories?"
+                st.rerun()
+            if st.button("Which tickets has Sean worked on?", key="starter_2", use_container_width=True):
+                st.session_state._chat_starter = "Which tickets has Sean worked on? Show me on the Results table."
+                st.rerun()
+        with starter_cols[1]:
+            if st.button("How many tickets could L2 support but didn't?", key="starter_3", use_container_width=True):
+                st.session_state._chat_starter = "How many tickets could L2 support but didn't have any L2 involvement?"
+                st.rerun()
+            if st.button("Show me all Account Access tickets", key="starter_4", use_container_width=True):
+                st.session_state._chat_starter = "Show me all Account Access Issues tickets on the Results table."
+                st.rerun()
+
+    # Handle starter prompt injection
+    if st.session_state.get("_chat_starter"):
+        _starter = st.session_state.pop("_chat_starter")
+        st.session_state.chat_messages.append({"role": "user", "content": _starter, "display": _starter})
+        api_messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.chat_messages]
+        try:
+            _chat_client = Anthropic()
+            _chat_response = _chat_client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=4096,
+                system=CHAT_SYSTEM_PROMPT.format(ticket_data=_ticket_context),
+                messages=api_messages,
+            )
+            _raw_reply = _chat_response.content[0].text
+            _filter_match = re.search(r'<<<FILTER>>>\s*(\{.*?\})\s*<<<END_FILTER>>>', _raw_reply, re.DOTALL)
+            _display_text = re.sub(r'\s*<<<FILTER>>>.*?<<<END_FILTER>>>\s*', '', _raw_reply, flags=re.DOTALL).strip()
+            if _filter_match:
+                try:
+                    _filter_data = json.loads(_filter_match.group(1))
+                    if _filter_data.get("type") == "clear":
+                        st.session_state.chat_filter = None
+                    else:
+                        st.session_state.chat_filter = _filter_data
+                except json.JSONDecodeError:
+                    pass
+            st.session_state.chat_messages.append({
+                "role": "assistant",
+                "content": _raw_reply,
+                "display": _display_text,
+            })
+        except Exception as e:
+            st.session_state.chat_messages.append({
+                "role": "assistant",
+                "content": f"Error: {e}",
+                "display": f"Error: {e}",
+            })
+        st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
