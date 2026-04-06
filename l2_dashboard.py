@@ -1211,15 +1211,155 @@ elif analysis_progress and analysis_progress.get("status") == "complete":
     clear_analysis_progress()
 
 
+# ── Chat dialog ──────────────────────────────────────────────────────────────
+if "chat_messages" not in st.session_state:
+    st.session_state.chat_messages = []
+if "chat_filter" not in st.session_state:
+    st.session_state.chat_filter = None
+
+
+@st.dialog("Chat with your ticket data", width="large")
+def _show_chat_dialog():
+    """Floating chat dialog overlaying the dashboard."""
+    st.caption("Ask questions about tickets, people, trends, or say \"show me\" / \"filter\" to update the Results table.")
+
+    # Build ticket context
+    _chat_df = load_results()
+    if _chat_df is not None and not _chat_df.empty:
+        _chat_sheet = load_google_sheet()
+        _chat_live, _ = _build_live_map_from_sheet(_chat_sheet)
+        _chat_tag_ovs = load_l2_tag_overrides()
+        for _tn, _ov in _chat_tag_ovs.items():
+            _chat_live[_tn] = (_ov.get("l2_involvement", "None"), _ov.get("l2_engineer", "None"))
+        if _chat_live:
+            _chat_df["l2_involvement"] = _chat_df["name"].map(
+                lambda n: _chat_live.get(n, ("None", "None"))[0]
+            ).fillna("None")
+            _chat_df["l2_engineer"] = _chat_df["name"].map(
+                lambda n: _chat_live.get(n, ("None", "None"))[1]
+            ).fillna("None")
+    _ticket_context = build_ticket_context(_chat_df)
+
+    # Display chat history
+    _chat_container = st.container(height=400)
+    with _chat_container:
+        for msg in st.session_state.chat_messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["display"])
+
+    # Starter prompts when empty
+    if not st.session_state.chat_messages:
+        st.markdown("**Try asking:**")
+        s1, s2 = st.columns(2)
+        with s1:
+            if st.button("Most common categories?", key="dlg_starter_1", use_container_width=True):
+                st.session_state._chat_starter = "What are the most common ticket categories?"
+                st.rerun()
+            if st.button("Sean's tickets", key="dlg_starter_2", use_container_width=True):
+                st.session_state._chat_starter = "Which tickets has Sean worked on? Show me on the Results table."
+                st.rerun()
+        with s2:
+            if st.button("L2 could support but didn't?", key="dlg_starter_3", use_container_width=True):
+                st.session_state._chat_starter = "How many tickets could L2 support but didn't have any L2 involvement?"
+                st.rerun()
+            if st.button("Account Access tickets", key="dlg_starter_4", use_container_width=True):
+                st.session_state._chat_starter = "Show me all Account Access Issues tickets on the Results table."
+                st.rerun()
+
+    # Handle starter prompt
+    if st.session_state.get("_chat_starter"):
+        _starter = st.session_state.pop("_chat_starter")
+        st.session_state.chat_messages.append({"role": "user", "content": _starter, "display": _starter})
+
+    # Chat input
+    _input_col, _clear_col = st.columns([6, 1])
+    with _input_col:
+        prompt = st.text_input("Ask a question...", key="chat_dialog_input", label_visibility="collapsed")
+    with _clear_col:
+        if st.button("Clear", key="dlg_clear_chat"):
+            st.session_state.chat_messages = []
+            st.session_state.chat_filter = None
+            st.rerun()
+
+    if prompt:
+        st.session_state.chat_messages.append({"role": "user", "content": prompt, "display": prompt})
+
+    # If there's a new user message, call Claude
+    if st.session_state.chat_messages and st.session_state.chat_messages[-1]["role"] == "user":
+        api_messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.chat_messages]
+        with st.spinner("Thinking..."):
+            try:
+                _chat_client = Anthropic()
+                _chat_response = _chat_client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=4096,
+                    system=CHAT_SYSTEM_PROMPT.format(ticket_data=_ticket_context),
+                    messages=api_messages,
+                )
+                _raw_reply = _chat_response.content[0].text
+
+                _filter_match = re.search(r'<<<FILTER>>>\s*(\{.*?\})\s*<<<END_FILTER>>>', _raw_reply, re.DOTALL)
+                _display_text = re.sub(r'\s*<<<FILTER>>>.*?<<<END_FILTER>>>\s*', '', _raw_reply, flags=re.DOTALL).strip()
+
+                if _filter_match:
+                    try:
+                        _filter_data = json.loads(_filter_match.group(1))
+                        if _filter_data.get("type") == "clear":
+                            st.session_state.chat_filter = None
+                        else:
+                            st.session_state.chat_filter = _filter_data
+                    except json.JSONDecodeError:
+                        pass
+
+                st.session_state.chat_messages.append({
+                    "role": "assistant",
+                    "content": _raw_reply,
+                    "display": _display_text,
+                })
+            except Exception as e:
+                st.session_state.chat_messages.append({
+                    "role": "assistant",
+                    "content": f"Error: {e}",
+                    "display": f"Error: {e}",
+                })
+        st.rerun()
+
+
 # ── Tabs ────────────────────────────────────────────────────────────────────
 _admin_mode = _is_admin()
 if _admin_mode:
-    tab1, tab2, tab3, tab_chat, tab5, tab_admin = st.tabs(
-        ["Results", "Run Analysis", "Trends", "Chat", "Google Sheet", "Admin"]
+    tab1, tab2, tab3, tab5, tab_admin = st.tabs(
+        ["Results", "Run Analysis", "Trends", "Google Sheet", "Admin"]
     )
 else:
-    tab1, tab2, tab3, tab_chat, tab5 = st.tabs(["Results", "Run Analysis", "Trends", "Chat", "Google Sheet"])
+    tab1, tab2, tab3, tab5 = st.tabs(["Results", "Run Analysis", "Trends", "Google Sheet"])
     tab_admin = None
+
+# ── Floating chat button (bottom-right corner) ──────────────────────────────
+st.markdown("""
+<style>
+    div[data-testid="stBottomBlockContainer"] div.chat-fab-wrapper {
+        position: fixed; bottom: 24px; right: 24px; z-index: 999;
+    }
+    div.chat-fab-wrapper button {
+        background-color: #00E676 !important; color: #2D333B !important;
+        border: none !important; border-radius: 50% !important;
+        width: 56px !important; height: 56px !important; min-width: 56px !important;
+        font-size: 1.5rem !important; padding: 0 !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.4) !important;
+        cursor: pointer !important;
+    }
+    div.chat-fab-wrapper button:hover {
+        background-color: #00C853 !important; transform: scale(1.05);
+    }
+</style>
+""", unsafe_allow_html=True)
+
+with st.container():
+    st.markdown('<div class="chat-fab-wrapper">', unsafe_allow_html=True)
+    if st.button("💬", key="chat_fab_btn", help="Chat with your ticket data"):
+        _show_chat_dialog()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # TAB 1: RESULTS
@@ -2222,189 +2362,6 @@ with tab3:
             st.info("No historical data yet. Each time you run an analysis, a snapshot is saved here.")
     else:
         st.info("No results yet. Run an analysis first to see charts and trends.")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# TAB: CHAT
-# ═══════════════════════════════════════════════════════════════════════════
-with tab_chat:
-    _chat_header_col, _chat_clear_col = st.columns([5, 1])
-    with _chat_header_col:
-        st.subheader("Chat with your ticket data")
-    with _chat_clear_col:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Clear chat", key="clear_chat_btn"):
-            st.session_state.chat_messages = []
-            st.session_state.chat_filter = None
-            st.rerun()
-    st.caption("Ask questions about tickets, people, trends, or say \"show me\" / \"filter\" to update the Results table.")
-
-    # ── Initialize chat state ──────────────────────────────────────────
-    if "chat_messages" not in st.session_state:
-        st.session_state.chat_messages = []
-    if "chat_filter" not in st.session_state:
-        st.session_state.chat_filter = None
-
-    # ── Build ticket context ───────────────────────────────────────────
-    _chat_df = load_results()
-    # Merge live L2 data so chat has the same view as Results tab
-    if _chat_df is not None and not _chat_df.empty:
-        _chat_sheet = load_google_sheet()
-        _chat_live, _ = _build_live_map_from_sheet(_chat_sheet)
-        _chat_tag_ovs = load_l2_tag_overrides()
-        for _tn, _ov in _chat_tag_ovs.items():
-            _chat_live[_tn] = (_ov.get("l2_involvement", "None"), _ov.get("l2_engineer", "None"))
-        if _chat_live:
-            _chat_df["l2_involvement"] = _chat_df["name"].map(
-                lambda n: _chat_live.get(n, ("None", "None"))[0]
-            ).fillna("None")
-            _chat_df["l2_engineer"] = _chat_df["name"].map(
-                lambda n: _chat_live.get(n, ("None", "None"))[1]
-            ).fillna("None")
-
-    _ticket_context = build_ticket_context(_chat_df)
-
-    # ── Active chat filter indicator ───────────────────────────────────
-    if st.session_state.chat_filter is not None:
-        cf = st.session_state.chat_filter
-        cf_type = cf.get("type", "")
-        if cf_type == "names":
-            cf_label = f"Chat filter: {len(cf.get('value', []))} specific tickets"
-        elif cf_type == "clear":
-            cf_label = None
-        else:
-            cf_label = f"Chat filter: {cf_type} = {cf.get('value', '')}"
-
-        if cf_label:
-            fcol1, fcol2 = st.columns([5, 1])
-            with fcol1:
-                st.info(f"**{cf_label}** — switch to Results tab to see filtered table")
-            with fcol2:
-                if st.button("Clear", key="chat_clear_filter"):
-                    st.session_state.chat_filter = None
-                    st.rerun()
-
-    # ── Display chat history ───────────────────────────────────────────
-    for msg in st.session_state.chat_messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["display"])
-
-    # ── Chat input ─────────────────────────────────────────────────────
-    if prompt := st.chat_input("Ask about tickets — e.g. 'What tickets has Mirah worked on this week?'"):
-        # Show user message
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        st.session_state.chat_messages.append({"role": "user", "content": prompt, "display": prompt})
-
-        # Build API messages (use content field, not display, to preserve full history)
-        api_messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.chat_messages]
-
-        # Call Claude
-        _chat_filter_applied = False
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                try:
-                    _chat_client = Anthropic()
-                    _chat_response = _chat_client.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=4096,
-                        system=CHAT_SYSTEM_PROMPT.format(ticket_data=_ticket_context),
-                        messages=api_messages,
-                    )
-                    _raw_reply = _chat_response.content[0].text
-
-                    # Parse filter command if present
-                    _filter_match = re.search(r'<<<FILTER>>>\s*(\{.*?\})\s*<<<END_FILTER>>>', _raw_reply, re.DOTALL)
-                    _display_text = re.sub(r'\s*<<<FILTER>>>.*?<<<END_FILTER>>>\s*', '', _raw_reply, flags=re.DOTALL).strip()
-
-                    if _filter_match:
-                        try:
-                            _filter_data = json.loads(_filter_match.group(1))
-                            if _filter_data.get("type") == "clear":
-                                st.session_state.chat_filter = None
-                            else:
-                                st.session_state.chat_filter = _filter_data
-                            _chat_filter_applied = True
-                        except json.JSONDecodeError:
-                            pass
-
-                    st.markdown(_display_text)
-                    st.session_state.chat_messages.append({
-                        "role": "assistant",
-                        "content": _raw_reply,
-                        "display": _display_text,
-                    })
-
-                except Exception as e:
-                    err_msg = f"Error getting response: {e}"
-                    st.error(err_msg)
-                    st.session_state.chat_messages.append({
-                        "role": "assistant",
-                        "content": err_msg,
-                        "display": err_msg,
-                    })
-
-        # Rerun to update filter indicator if a filter was applied
-        if _chat_filter_applied:
-            st.rerun()
-
-    # ── Starter prompts ────────────────────────────────────────────────
-    if not st.session_state.chat_messages:
-        st.markdown("---")
-        st.markdown("**Try asking:**")
-        starter_cols = st.columns(2)
-        with starter_cols[0]:
-            if st.button("What are the most common ticket categories?", key="starter_1", use_container_width=True):
-                st.session_state._chat_starter = "What are the most common ticket categories?"
-                st.rerun()
-            if st.button("Which tickets has Sean worked on?", key="starter_2", use_container_width=True):
-                st.session_state._chat_starter = "Which tickets has Sean worked on? Show me on the Results table."
-                st.rerun()
-        with starter_cols[1]:
-            if st.button("How many tickets could L2 support but didn't?", key="starter_3", use_container_width=True):
-                st.session_state._chat_starter = "How many tickets could L2 support but didn't have any L2 involvement?"
-                st.rerun()
-            if st.button("Show me all Account Access tickets", key="starter_4", use_container_width=True):
-                st.session_state._chat_starter = "Show me all Account Access Issues tickets on the Results table."
-                st.rerun()
-
-    # Handle starter prompt injection
-    if st.session_state.get("_chat_starter"):
-        _starter = st.session_state.pop("_chat_starter")
-        st.session_state.chat_messages.append({"role": "user", "content": _starter, "display": _starter})
-        api_messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.chat_messages]
-        try:
-            _chat_client = Anthropic()
-            _chat_response = _chat_client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=4096,
-                system=CHAT_SYSTEM_PROMPT.format(ticket_data=_ticket_context),
-                messages=api_messages,
-            )
-            _raw_reply = _chat_response.content[0].text
-            _filter_match = re.search(r'<<<FILTER>>>\s*(\{.*?\})\s*<<<END_FILTER>>>', _raw_reply, re.DOTALL)
-            _display_text = re.sub(r'\s*<<<FILTER>>>.*?<<<END_FILTER>>>\s*', '', _raw_reply, flags=re.DOTALL).strip()
-            if _filter_match:
-                try:
-                    _filter_data = json.loads(_filter_match.group(1))
-                    if _filter_data.get("type") == "clear":
-                        st.session_state.chat_filter = None
-                    else:
-                        st.session_state.chat_filter = _filter_data
-                except json.JSONDecodeError:
-                    pass
-            st.session_state.chat_messages.append({
-                "role": "assistant",
-                "content": _raw_reply,
-                "display": _display_text,
-            })
-        except Exception as e:
-            st.session_state.chat_messages.append({
-                "role": "assistant",
-                "content": f"Error: {e}",
-                "display": f"Error: {e}",
-            })
-        st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
