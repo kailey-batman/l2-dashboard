@@ -112,11 +112,15 @@ CUSTOMER_KEYWORDS = [
     "company", "org ", "organization", "enterprise", "prospect", "vendor",
 ]
 ANALYSIS_BATCH_SIZE = 20
-CHATBOT_MAX_TICKETS = 500
+CHATBOT_MAX_TICKETS = None  # No limit — include all tickets
 CONTACTS_FILE = os.path.join(_APP_DIR, "fr_contacts.json")
 CONTACTS_PROGRESS_FILE = os.path.join(_APP_DIR, "fr_contacts_progress.json")
+SUMMARIES_FILE = os.path.join(_APP_DIR, "fr_summaries.json")
+SUMMARIES_PROGRESS_FILE = os.path.join(_APP_DIR, "fr_summaries_progress.json")
+SUMMARY_BATCH_SIZE = 20
 
 _contacts_lock = threading.Lock()
+_summaries_lock = threading.Lock()
 
 # ============================================================
 # GOOGLE SHEETS AUTH
@@ -844,6 +848,107 @@ def start_contact_extraction(df: pd.DataFrame, ai: anthropic.Anthropic):
     t.start()
 
 
+# ============================================================
+# TICKET SUMMARY EXTRACTION (cached, incremental)
+# ============================================================
+
+def load_summaries() -> dict:
+    if os.path.exists(SUMMARIES_FILE):
+        try:
+            with open(SUMMARIES_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_summaries(summaries: dict):
+    with _summaries_lock:
+        with open(SUMMARIES_FILE, "w") as f:
+            json.dump(summaries, f)
+
+
+def load_summaries_progress() -> dict:
+    if os.path.exists(SUMMARIES_PROGRESS_FILE):
+        try:
+            with open(SUMMARIES_PROGRESS_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"done": 0, "total": 0, "running": False}
+
+
+def _summarize_batch(ai: anthropic.Anthropic, batch: list) -> list:
+    ticket_lines = []
+    for t in batch:
+        ticket_lines.append(
+            f"[{t['id']}] Title: {t['title']}\n"
+            f"Description: {t['description'][:600]}"
+        )
+    tickets_text = ("\n" + "=" * 60 + "\n").join(ticket_lines)
+    prompt = f"""Summarize each feature request ticket in ONE concise sentence (max 120 chars).
+Capture the core ask — what the user wants and why.
+
+Tickets:
+
+{tickets_text}
+
+Respond with a JSON array — one object per ticket, in the same order:
+[{{"id": "<id>", "summary": "one sentence summary"}}]
+No other text."""
+    try:
+        resp = ai.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=SUMMARY_BATCH_SIZE * 60,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = resp.content[0].text.strip()
+        if text.startswith("```"):
+            text = "\n".join(text.split("\n")[1:]).rstrip("`").strip()
+        return json.loads(text)
+    except Exception:
+        return [{"id": t["id"], "summary": t["title"]} for t in batch]
+
+
+def _run_summary_extraction_thread(df: pd.DataFrame, ai: anthropic.Anthropic):
+    summaries = load_summaries()
+    id_col = COLUMNS.get("id", "id")
+    title_col = COLUMNS.get("title", "name")
+    desc_col = COLUMNS.get("description", "description")
+
+    to_summarize = []
+    for _, row in df.iterrows():
+        ticket_id = str(row.get(id_col, ""))
+        if ticket_id in summaries:
+            continue
+        to_summarize.append({
+            "id": ticket_id,
+            "title": str(row.get(title_col, "")),
+            "description": str(row.get(desc_col, "")),
+        })
+
+    total = len(to_summarize)
+
+    for batch_start in range(0, total, SUMMARY_BATCH_SIZE):
+        batch = to_summarize[batch_start: batch_start + SUMMARY_BATCH_SIZE]
+        results = _summarize_batch(ai, batch)
+        for r in results:
+            summaries[str(r.get("id", ""))] = r.get("summary", "")
+        done = batch_start + len(batch)
+        save_summaries(summaries)
+        with open(SUMMARIES_PROGRESS_FILE, "w") as f:
+            json.dump({"done": done, "total": total, "running": True}, f)
+
+    save_summaries(summaries)
+    with open(SUMMARIES_PROGRESS_FILE, "w") as f:
+        json.dump({"done": total, "total": total, "running": False}, f)
+
+
+def start_summary_extraction(df: pd.DataFrame, ai: anthropic.Anthropic):
+    t = threading.Thread(target=_run_summary_extraction_thread, args=(df, ai), daemon=True)
+    t.start()
+
+
 def apply_contacts_to_df(df: pd.DataFrame, contacts: dict) -> pd.DataFrame:
     id_col = COLUMNS.get("id", "id")
     def _contact_str(row):
@@ -871,22 +976,18 @@ def _get(row: pd.Series, key: str, default: str = "") -> str:
     return default
 
 
-def format_tickets_for_context(df: pd.DataFrame, contacts: dict) -> str:
+def format_tickets_for_context(df: pd.DataFrame, contacts: dict, summaries: dict | None = None) -> str:
     if df.empty:
         return "No feature request tickets available."
     id_col = COLUMNS.get("id", "id")
-    sample = df.head(CHATBOT_MAX_TICKETS)
+    sample = df if CHATBOT_MAX_TICKETS is None else df.head(CHATBOT_MAX_TICKETS)
+    if summaries is None:
+        summaries = {}
     lines = []
     for i, (_, row) in enumerate(sample.iterrows(), start=1):
         title       = _get(row, "title") or f"Ticket #{i}"
         ticket_id   = _get(row, "id")
         area        = _get(row, "product_area")
-        priority    = _get(row, "priority")
-        submitter   = _get(row, "submitter")
-        ts          = _get(row, "timestamp")
-        description = _get(row, "description")
-        labels      = _get(row, "labels")
-        status      = _get(row, "status")
         severity_label = str(row.get("severity_label", ""))
         score_pts   = str(row.get("score_pts", ""))
         company     = str(row.get("company_name_parsed", ""))
@@ -897,35 +998,34 @@ def format_tickets_for_context(df: pd.DataFrame, contacts: dict) -> str:
         contact_company = c.get("company") or ""
         contact_role    = c.get("role") or ""
 
+        # Use cached summary if available, else fall back to truncated description
+        summary = summaries.get(str(row.get(id_col, "")), "")
+        if not summary:
+            raw_desc = _get(row, "description")
+            summary = (raw_desc[:200] + "...") if len(raw_desc) > 200 else raw_desc
+
         id_part = f"sc-{ticket_id}" if ticket_id else f"#{i}"
         header = f"[{id_part}] {title}"
-        if severity_label: header += f"  |  Severity: {severity_label} ({score_pts}pts)"
-        if company:        header += f"  |  Company: {company} ({tier_label})"
-        if area:           header += f"  |  Area: {area}"
-        if priority:       header += f"  |  Priority: {priority}"
-        if status:         header += f"  |  State: {status}"
-        if submitter:      header += f"  |  Requester: {submitter}"
-        if ts:             header += f"  |  Created: {str(ts)[:10]}"
+        if severity_label: header += f"  |  {severity_label} ({score_pts}pts)"
+        if company:        header += f"  |  {company} ({tier_label})"
+        if area:           header += f"  |  {area}"
 
         body_lines = [header]
-        if themes_str:   body_lines.append(f"   Themes: {themes_str}")
-        if description:  body_lines.append(f"   Description: {description[:400]}{'...' if len(description) > 400 else ''}")
+        if themes_str:  body_lines.append(f"   Themes: {themes_str}")
+        if summary:     body_lines.append(f"   Summary: {summary}")
         if contact_name:
             cl = f"   Contact: {contact_name}"
             if contact_company: cl += f" ({contact_company})"
             if contact_role:    cl += f" — {contact_role}"
             body_lines.append(cl)
-        if labels: body_lines.append(f"   Labels: {labels}")
         lines.append("\n".join(body_lines))
 
-    total = len(df)
-    suffix = f"\n\n[Note: Showing {CHATBOT_MAX_TICKETS} of {total} total tickets due to context limits.]" if total > CHATBOT_MAX_TICKETS else ""
-    return "\n\n".join(lines) + suffix
+    return "\n\n".join(lines)
 
 
-def build_system_prompt(df: pd.DataFrame, contacts: dict) -> str:
-    ticket_count = min(len(df), CHATBOT_MAX_TICKETS)
-    tickets_text = format_tickets_for_context(df, contacts)
+def build_system_prompt(df: pd.DataFrame, contacts: dict, summaries: dict | None = None) -> str:
+    ticket_count = len(df) if CHATBOT_MAX_TICKETS is None else min(len(df), CHATBOT_MAX_TICKETS)
+    tickets_text = format_tickets_for_context(df, contacts, summaries)
     return f"""You are a product analyst specializing in NPI (New Product Introduction) impact assessment.
 
 You have access to {ticket_count} customer feature request ticket(s), each scored by priority (P1/P2/P3) based on company tier, urgency, and volume.
@@ -1089,13 +1189,41 @@ def main():
             start_contact_extraction(df_raw, ai)
             progress = {"running": True, "done": 0, "total": len(df_raw)}
 
-    if progress.get("running"):
+    # Summary extraction (runs after contact extraction finishes, or in parallel if contacts done)
+    summaries = load_summaries()
+    sum_progress = load_summaries_progress()
+
+    if not df_raw.empty and ai:
+        id_col_name = COLUMNS.get("id", "id")
+        unsummarized = [
+            str(row.get(id_col_name, ""))
+            for _, row in df_raw.iterrows()
+            if str(row.get(id_col_name, "")) not in summaries
+        ]
+        if unsummarized and not sum_progress.get("running"):
+            start_summary_extraction(df_raw, ai)
+            sum_progress = {"running": True, "done": 0, "total": len(unsummarized)}
+
+    any_running = progress.get("running") or sum_progress.get("running")
+    if any_running:
         st.markdown('<meta http-equiv="refresh" content="4">', unsafe_allow_html=True)
+
+    if progress.get("running"):
         done  = progress.get("done", 0)
         total = progress.get("total", 1)
         st.markdown(f"""
         <div class="progress-banner">
             <span class="progress-text">Analyzing tickets… {done}/{total} processed — filtering to customer requests</span>
+        </div>
+        """, unsafe_allow_html=True)
+        st.progress(done / total if total > 0 else 0)
+
+    if sum_progress.get("running"):
+        done  = sum_progress.get("done", 0)
+        total = sum_progress.get("total", 1)
+        st.markdown(f"""
+        <div class="progress-banner">
+            <span class="progress-text">Summarizing tickets… {done}/{total} processed — building chatbot context</span>
         </div>
         """, unsafe_allow_html=True)
         st.progress(done / total if total > 0 else 0)
@@ -1465,13 +1593,19 @@ def main():
 
         bar1, bar2 = st.columns([5, 1])
         with bar1:
-            ticket_count = min(len(df), CHATBOT_MAX_TICKETS)
+            ticket_count = len(df) if CHATBOT_MAX_TICKETS is None else min(len(df), CHATBOT_MAX_TICKETS)
             contacts_extracted = sum(1 for v in contacts.values() if v.get("name"))
-            label = f"Analyzing {ticket_count:,} tickets (scored P1–P3)"
-            if ticket_count < len(df):
-                label += f" ({ticket_count / len(df) * 100:.0f}% of total)"
+            summarized_count = sum(1 for tid in df[COLUMNS.get("id", "id")].astype(str) if tid in summaries)
+            label = f"Analyzing all {ticket_count:,} tickets (scored P1–P3)"
+            if CHATBOT_MAX_TICKETS is not None and ticket_count < len(df):
+                label = f"Analyzing {ticket_count:,} tickets (scored P1–P3) ({ticket_count / len(df) * 100:.0f}% of total)"
+            parts = []
+            if summarized_count:
+                parts.append(f"{summarized_count:,} summarized")
             if contacts_extracted:
-                label += f" · {contacts_extracted} contacts extracted"
+                parts.append(f"{contacts_extracted} contacts")
+            if parts:
+                label += f" · {' · '.join(parts)}"
             st.caption(label)
         with bar2:
             if st.button("🗑️ Clear Chat", use_container_width=True):
@@ -1495,7 +1629,7 @@ def main():
                     full_response = "ANTHROPIC_API_KEY is not configured."
                     placeholder.markdown(full_response)
                 else:
-                    system_prompt = build_system_prompt(df, contacts)
+                    system_prompt = build_system_prompt(df, contacts, summaries)
                     api_msgs = [{"role": m["role"], "content": m["content"]}
                                 for m in st.session_state.chat_messages]
                     try:
