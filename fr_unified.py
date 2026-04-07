@@ -33,7 +33,7 @@ st.markdown("""
     .stApp { background-color: #2D333B; }
 
     .header-container {
-        display: flex; align-items: center; gap: 16px; padding: 0.5rem 0 0.5rem 0;
+        display: flex; align-items: center; gap: 16px; padding: 1.5rem 0 0.5rem 0;
     }
     .header-container img { width: 48px; height: 48px; }
     .header-container h1 { color: #00E676; margin: 0; font-size: 2rem; }
@@ -1282,7 +1282,7 @@ def main():
 
         m1, m2, m3, m4, m5 = st.columns(5)
         with m1:
-            st.markdown(_metric_card("Total Requests", f"{len(df):,}"), unsafe_allow_html=True)
+            st.markdown(_metric_card("Customer Identified Requests", f"{len(df):,}"), unsafe_allow_html=True)
         with m2:
             pct = f"{p1_count/len(df)*100:.0f}% of total" if len(df) > 0 else ""
             st.markdown(_metric_card("P1 Critical", p1_count, sub=pct), unsafe_allow_html=True)
