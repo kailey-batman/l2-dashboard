@@ -1070,7 +1070,7 @@ def resolve_col(key: str, df: pd.DataFrame):
 def _metric_card(label, value, sub=None):
     sub_html = f'<div style="color:#9E9E9E;font-size:0.78rem;margin-top:4px;">{sub}</div>' if sub else ""
     return f"""
-    <div style="background-color:#373E47;border:1px solid #444C56;border-radius:10px;
+    <div style="background-color:#373E47;border:2px solid #555D67;border-radius:10px;
                 padding:16px 20px;min-height:100px;display:flex;flex-direction:column;justify-content:space-between;">
         <div style="color:#9E9E9E;font-size:0.85rem;font-weight:700;">{label}</div>
         <div style="color:#E0E0E0;font-size:2rem;font-weight:700;line-height:1.1;">{value}</div>
