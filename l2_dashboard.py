@@ -1753,7 +1753,7 @@ with tab1:
 
             sort_col1, sort_col2 = st.columns([2, 1])
             with sort_col1:
-                sort_by = st.selectbox("Sort by:", ["name", "decision", "category", "confidence"])
+                sort_by = st.selectbox("Sort by:", ["name", "created_at", "decision", "category", "confidence"])
             with sort_col2:
                 sort_order = st.selectbox("Order:", ["Ascending", "Descending"])
 
@@ -1819,8 +1819,9 @@ with tab1:
             filtered = filtered[filtered["confidence"] >= 4]
 
         st.markdown(f"**Showing {len(filtered)} of {total} tickets**")
+        _sort_col = "_parsed_date" if sort_by == "created_at" and "_parsed_date" in filtered.columns else sort_by
         filtered = filtered.sort_values(
-            by=sort_by,
+            by=_sort_col,
             ascending=(sort_order == "Ascending")
         ).reset_index(drop=True)
 
@@ -1844,11 +1845,9 @@ with tab1:
         # Build display table
         styled_page = page_df[available_cols_base].copy()
 
-        # Format created_at to just the date
-        if "created_at" in styled_page.columns:
-            styled_page["created_at"] = styled_page["created_at"].apply(
-                lambda x: str(x).split(" ")[0] if isinstance(x, str) and " " in x else x
-            )
+        # Use parsed dates for proper sorting in the dataframe widget
+        if "created_at" in styled_page.columns and "_parsed_date" in page_df.columns:
+            styled_page["created_at"] = page_df["_parsed_date"]
 
         # Add Shortcut Link column
         has_urls = "shortcut_url" in page_df.columns and page_df["shortcut_url"].astype(str).str.startswith("http").any()
@@ -1863,7 +1862,7 @@ with tab1:
         }).fillna(styled_page.get("decision", ""))
 
         col_config = {
-            "created_at": st.column_config.TextColumn("Filed", width="small"),
+            "created_at": st.column_config.DateColumn("Filed", width="small"),
             "state": st.column_config.TextColumn("Status", width="small"),
         }
         if has_urls:
