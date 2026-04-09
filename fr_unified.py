@@ -1369,6 +1369,9 @@ def main():
         link_col = COLUMNS.get("link", "")
         if link_col and link_col in display_cols:
             col_config[link_col] = st.column_config.LinkColumn("Link", display_text="Shortcut ↗")
+        status_col = COLUMNS.get("status", "")
+        if status_col and status_col in display_cols:
+            col_config[status_col] = st.column_config.TextColumn("Status")
 
         st.dataframe(fdf[display_cols], use_container_width=True, height=400, column_config=col_config)
 
@@ -1435,7 +1438,7 @@ def main():
 
         # Downloads
         st.markdown("---")
-        dl1, dl2 = st.columns(2)
+        dl1, dl2, dl3 = st.columns(3)
         with dl1:
             buf = io.StringIO()
             fdf.to_csv(buf, index=False)
@@ -1447,6 +1450,32 @@ def main():
             df.to_csv(buf2, index=False)
             st.download_button("⬇️ Download All Feature Requests", buf2.getvalue(),
                 file_name=f"fr_all_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv", use_container_width=True)
+        with dl3:
+            id_col = COLUMNS.get("id", "id")
+            title_col_name = COLUMNS.get("title", "name")
+            link_col_name = COLUMNS.get("link", "app_url")
+            status_col_name = COLUMNS.get("status", "state")
+            contact_rows = []
+            for _, row in fdf.iterrows():
+                tid = str(row.get(id_col, ""))
+                c = contacts.get(tid, {})
+                contact_rows.append({
+                    "Ticket ID": tid,
+                    "Title": str(row.get(title_col_name, "")),
+                    "Status": str(row.get(status_col_name, "")) if status_col_name and status_col_name in row.index else "",
+                    "Shortcut Link": str(row.get(link_col_name, "")) if link_col_name and link_col_name in row.index else "",
+                    "Contact Name": c.get("name") or "",
+                    "Company": c.get("company") or "",
+                    "Role": c.get("role") or "",
+                    "Severity": str(row.get("severity_label", "")),
+                    "Tier": str(row.get("tier_label", "")),
+                })
+            contact_df = pd.DataFrame(contact_rows)
+            buf3 = io.StringIO()
+            contact_df.to_csv(buf3, index=False)
+            st.download_button("📇 Export Contacts", buf3.getvalue(),
+                file_name=f"fr_contacts_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv", use_container_width=True)
 
     # ════════════════════════════════════════════════════════
