@@ -1430,19 +1430,26 @@ with tab1:
         ) | results_df["_parsed_date"].isna()
         results_df = results_df[date_mask].copy()
 
-    # Pre-compute L2 stats from ALL sheet tickets (not just analyzed ones)
-    _tagged = [(inv, eng) for inv, eng in live_map.values() if inv != "None"]
-    l2_involved_count   = len(_tagged)
-    sean_count          = sum(1 for _, eng in _tagged if eng == "Sean")
-    jayson_count        = sum(1 for _, eng in _tagged if eng == "Jayson")
-    l2_level_5_count    = sum(1 for inv, _ in _tagged if inv.startswith("5"))
-    l2_level_4_count    = sum(1 for inv, _ in _tagged if inv.startswith("4"))
-    l2_level_3_count    = sum(1 for inv, _ in _tagged if inv.startswith("3"))
-    l2_level_2_count    = sum(1 for inv, _ in _tagged if inv.startswith("2"))
-    l2_level_1_count    = sum(1 for inv, _ in _tagged if inv.startswith("1"))
-    no_epd_count        = sum(1 for inv, _ in _tagged if inv.lower().startswith("no epd"))
-    avg_l2_level        = (sum(int(inv[0]) for inv, _ in _tagged if inv[0].isdigit()) / l2_involved_count
-                           if l2_involved_count > 0 else 0)
+    # Pre-compute L2 stats from results_df so counts match what the table can show
+    if results_df is not None and not results_df.empty and "l2_involvement" in results_df.columns:
+        _inv_series = results_df["l2_involvement"].astype(str)
+        _eng_series = results_df["l2_engineer"].astype(str) if "l2_engineer" in results_df.columns else pd.Series(["None"] * len(results_df))
+        l2_involved_count   = (_inv_series != "None").sum()
+        sean_count          = (_eng_series == "Sean").sum()
+        jayson_count        = (_eng_series == "Jayson").sum()
+        l2_level_5_count    = _inv_series.str.startswith("5").sum()
+        l2_level_4_count    = _inv_series.str.startswith("4").sum()
+        l2_level_3_count    = _inv_series.str.startswith("3").sum()
+        l2_level_2_count    = _inv_series.str.startswith("2").sum()
+        l2_level_1_count    = _inv_series.str.startswith("1").sum()
+        no_epd_count        = _inv_series.str.lower().str.startswith("no epd").sum()
+        _numeric = _inv_series.str[0].apply(lambda x: int(x) if x.isdigit() else None).dropna()
+        avg_l2_level        = _numeric.mean() if len(_numeric) > 0 else 0
+    else:
+        l2_involved_count = sean_count = jayson_count = 0
+        l2_level_5_count = l2_level_4_count = l2_level_3_count = 0
+        l2_level_2_count = l2_level_1_count = no_epd_count = 0
+        avg_l2_level = 0
 
     if results_df is not None and not results_df.empty:
         # ── Metric filter state ──────────────────────────────────────
@@ -1757,9 +1764,13 @@ with tab1:
             with sort_col2:
                 sort_order = st.selectbox("Order:", ["Ascending", "Descending"])
 
-        # Exclude Insufficient Data unless explicitly drilling into it
+        # Exclude Insufficient Data unless drilling into it or filtering by L2 level/engineer
         mf = st.session_state.get("metric_filter")
-        if mf is not None and mf == ("decision", "Insufficient Data"):
+        _keep_all = (mf is not None and (
+            mf == ("decision", "Insufficient Data")
+            or mf[0] in ("l2_level", "l2_engineer", "l2_involvement")
+        ))
+        if _keep_all:
             filtered = results_df.copy()
         else:
             filtered = results_df[results_df["decision"] != "Insufficient Data"].copy()
