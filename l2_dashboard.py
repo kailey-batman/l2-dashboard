@@ -139,7 +139,7 @@ You have access to the complete ticket dataset. Use it to answer questions about
 Key field meanings:
 - **decision**: "L2 Can Support", "L2 Cannot Support", "Partially Supported", or "Insufficient Data"
 - **l2_engineer**: "Sean", "Jayson", or "None" — the L2 engineer who worked on it
-- **l2_involvement**: Level 1-5 scale. 5=Independent Resolution (L2 handled it alone), 4=Near-Complete, 3=Framework Provided, 2=Technical Enrichment, 1=Escalated. "None" means no L2 involvement.
+- **l2_involvement**: Level 1-5 scale. 5=Independent Resolution (L2 handled it alone), 4=Near-Complete, 3=Framework Provided, 2=Technical Enrichment, 1=Escalated. "No EPD Involved (resolved for L1)" means L1 resolved it without any EPD involvement. "None" means no L2 involvement.
 - **support_person**: The support person who handled the ticket in Intercom
 - **category**: The type of issue (e.g., Account Access Issues, Data Restores, etc.)
 - **confidence**: 1-5 rating of how confident the AI evaluation was
@@ -286,6 +286,7 @@ def parse_shortcut_activity_for_l2(shortcut_activity):
         "3": "3 - Framework Provided",
         "2": "2 - Technical Enrichment",
         "1": "1 - Escalated (No Context)",
+        "0": "No EPD Involved (resolved for L1)",
     }
 
     matches = []
@@ -295,23 +296,25 @@ def parse_shortcut_activity_for_l2(shortcut_activity):
     # Tolerates → or -> as arrow
     pattern = re.compile(
         r'\[(\d{4}-\d{2}-\d{2}T[\d:.Z]+)\]\s+([^\u2014\u2013\-\n]+?)\s*[\u2014\u2013]\s*'
-        r'update story\s+(?:changed .+?(?:\u2192|->)\s*L2 Support Level:\s*|set L2 Support Level:\s*)(\d)',
+        r'update story\s+(?:changed .+?(?:\u2192|->)\s*L2 Support Level:\s*|set L2 Support Level:\s*)(\d|No EPD)',
         re.IGNORECASE,
     )
     for m in pattern.finditer(shortcut_activity):
-        matches.append((m.group(1), m.group(2).strip(), m.group(3)))
+        level = "0" if m.group(3).lower().startswith("no") else m.group(3)
+        matches.append((m.group(1), m.group(2).strip(), level))
 
-    # Strategy 2: simpler fallback — just find any "L2 Support Level: DIGIT" with a person name nearby
+    # Strategy 2: simpler fallback — just find any "L2 Support Level: DIGIT|No EPD" with a person name nearby
     if not matches:
         simple = re.compile(
-            r'\[(\d{4}-\d{2}-\d{2}T[\d:.Z]+)\]\s+(\S[^\[\n]*?)\s*[\u2014\u2013\-]{1,3}\s*.*?L2 Support Level:\s*(\d)',
+            r'\[(\d{4}-\d{2}-\d{2}T[\d:.Z]+)\]\s+(\S[^\[\n]*?)\s*[\u2014\u2013\-]{1,3}\s*.*?L2 Support Level:\s*(\d|No EPD)',
             re.IGNORECASE,
         )
         for m in simple.finditer(shortcut_activity):
             # Only include lines that are actually setting/changing L2 level
             line = shortcut_activity[m.start():shortcut_activity.find('\n', m.start()) if '\n' in shortcut_activity[m.start():] else m.end() + 200]
             if 'l2 support level' in line.lower():
-                matches.append((m.group(1), m.group(2).strip(), m.group(3)))
+                level = "0" if m.group(3).lower().startswith("no") else m.group(3)
+                matches.append((m.group(1), m.group(2).strip(), level))
 
     if not matches:
         return "None", "None"
@@ -1437,6 +1440,7 @@ with tab1:
     l2_level_3_count    = sum(1 for inv, _ in _tagged if inv.startswith("3"))
     l2_level_2_count    = sum(1 for inv, _ in _tagged if inv.startswith("2"))
     l2_level_1_count    = sum(1 for inv, _ in _tagged if inv.startswith("1"))
+    no_epd_count        = sum(1 for inv, _ in _tagged if inv.lower().startswith("no epd"))
     avg_l2_level        = (sum(int(inv[0]) for inv, _ in _tagged if inv[0].isdigit()) / l2_involved_count
                            if l2_involved_count > 0 else 0)
 
@@ -1576,7 +1580,7 @@ with tab1:
 
         # ── Row 3: L2 Support Levels (from all 682 sheet rows) ────────
         st.markdown("**L2 Support Levels**")
-        lv1, lv2, lv3, lv4, lv5 = st.columns(5)
+        lv1, lv2, lv3, lv4, lv5, lv6 = st.columns(6)
 
         with lv1:
             st.markdown(metric_card_html("5 - Independent", l2_level_5_count), unsafe_allow_html=True)
@@ -1603,12 +1607,17 @@ with tab1:
             if st.button("x", key="btn_lv1", use_container_width=True):
                 st.session_state.metric_filter = ("l2_level", "1")
                 st.rerun()
+        with lv6:
+            st.markdown(metric_card_html("No EPD Involved", no_epd_count), unsafe_allow_html=True)
+            if st.button("x", key="btn_no_epd", use_container_width=True):
+                st.session_state.metric_filter = ("l2_level", "No EPD")
+                st.rerun()
 
 
         # ── Active filter indicator ──────────────────────────────────
         if st.session_state.metric_filter is not None:
             filt = st.session_state.metric_filter
-            level_labels = {"5": "5 - Independent Resolution", "4": "4 - Near-Complete", "3": "3 - Framework Provided", "2": "2 - Technical Enrichment", "1": "1 - Escalated"}
+            level_labels = {"5": "5 - Independent Resolution", "4": "4 - Near-Complete", "3": "3 - Framework Provided", "2": "2 - Technical Enrichment", "1": "1 - Escalated", "No EPD": "No EPD Involved (resolved for L1)"}
             if filt[0] == "gap":
                 label = "Gap: Could support but no L2 involvement"
             elif filt[0] == "l2_level":
