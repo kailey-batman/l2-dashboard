@@ -4,3 +4,7 @@ __pycache__/
 .streamlit/secrets.toml
 service_account.json
 analysis_progress.json
+fr_unified.py
+fr_contacts.json
+fr_contacts_progress.json
+company_tiers.json
