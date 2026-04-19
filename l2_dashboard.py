@@ -1569,16 +1569,22 @@ with tab1:
             st.markdown(metric_card_html("L2 Involved", l2_involved_count, delta=pct), unsafe_allow_html=True)
             if st.button("x", key="btn_l2_involved", use_container_width=True):
                 st.session_state.metric_filter = ("l2_involvement", "!=None")
+                for _k in ("rflt_decision", "rflt_cat", "rflt_conf"):
+                    st.session_state.pop(_k, None)
                 st.rerun()
         with l2_r1c2:
             st.markdown(metric_card_html("Sean", sean_count), unsafe_allow_html=True)
             if st.button("x", key="btn_sean", use_container_width=True):
                 st.session_state.metric_filter = ("l2_engineer", "Sean")
+                for _k in ("rflt_decision", "rflt_cat", "rflt_conf"):
+                    st.session_state.pop(_k, None)
                 st.rerun()
         with l2_r1c3:
             st.markdown(metric_card_html("Jayson", jayson_count), unsafe_allow_html=True)
             if st.button("x", key="btn_jayson", use_container_width=True):
                 st.session_state.metric_filter = ("l2_engineer", "Jayson")
+                for _k in ("rflt_decision", "rflt_cat", "rflt_conf"):
+                    st.session_state.pop(_k, None)
                 st.rerun()
         with l2_r1c4:
             html = metric_card_html("Avg L2 Level", f"{avg_l2_level:.1f}/5")
@@ -1593,31 +1599,43 @@ with tab1:
             st.markdown(metric_card_html("5 - Independent", l2_level_5_count), unsafe_allow_html=True)
             if st.button("x", key="btn_lv5", use_container_width=True):
                 st.session_state.metric_filter = ("l2_level", "5")
+                for _k in ("rflt_decision", "rflt_cat", "rflt_conf"):
+                    st.session_state.pop(_k, None)
                 st.rerun()
         with lv2:
             st.markdown(metric_card_html("4 - Near-Complete", l2_level_4_count), unsafe_allow_html=True)
             if st.button("x", key="btn_lv4", use_container_width=True):
                 st.session_state.metric_filter = ("l2_level", "4")
+                for _k in ("rflt_decision", "rflt_cat", "rflt_conf"):
+                    st.session_state.pop(_k, None)
                 st.rerun()
         with lv3:
             st.markdown(metric_card_html("3 - Framework", l2_level_3_count), unsafe_allow_html=True)
             if st.button("x", key="btn_lv3", use_container_width=True):
                 st.session_state.metric_filter = ("l2_level", "3")
+                for _k in ("rflt_decision", "rflt_cat", "rflt_conf"):
+                    st.session_state.pop(_k, None)
                 st.rerun()
         with lv4:
             st.markdown(metric_card_html("2 - Enrichment", l2_level_2_count), unsafe_allow_html=True)
             if st.button("x", key="btn_lv2", use_container_width=True):
                 st.session_state.metric_filter = ("l2_level", "2")
+                for _k in ("rflt_decision", "rflt_cat", "rflt_conf"):
+                    st.session_state.pop(_k, None)
                 st.rerun()
         with lv5:
             st.markdown(metric_card_html("1 - Escalated", l2_level_1_count), unsafe_allow_html=True)
             if st.button("x", key="btn_lv1", use_container_width=True):
                 st.session_state.metric_filter = ("l2_level", "1")
+                for _k in ("rflt_decision", "rflt_cat", "rflt_conf"):
+                    st.session_state.pop(_k, None)
                 st.rerun()
         with lv6:
             st.markdown(metric_card_html("No EPD Involved", no_epd_count), unsafe_allow_html=True)
             if st.button("x", key="btn_no_epd", use_container_width=True):
                 st.session_state.metric_filter = ("l2_level", "No EPD")
+                for _k in ("rflt_decision", "rflt_cat", "rflt_conf"):
+                    st.session_state.pop(_k, None)
                 st.rerun()
 
 
@@ -1748,14 +1766,16 @@ with tab1:
                 filter_option = st.selectbox(
                     "Filter by decision:",
                     ["All", "L2 Can Support", "L2 Cannot Support", "Partially Supported", "Insufficient Data"],
+                    key="rflt_decision",
                 )
             with col_f2:
                 categories = ["All"] + sorted([str(c) for c in results_df["category"].dropna().unique().tolist()])
-                filter_category = st.selectbox("Filter by category:", categories)
+                filter_category = st.selectbox("Filter by category:", categories, key="rflt_cat")
             with col_f3:
                 confidence_filter = st.selectbox(
                     "Filter by confidence:",
                     ["All", "Low (1-2)", "Medium (3)", "High (4-5)"],
+                    key="rflt_conf",
                 )
 
             sort_col1, sort_col2 = st.columns([2, 1])
