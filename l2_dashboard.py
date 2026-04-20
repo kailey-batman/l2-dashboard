@@ -1404,22 +1404,29 @@ with tab1:
     _has_dates = (results_df is not None and not results_df.empty
                   and "_parsed_date" in results_df.columns
                   and results_df["_parsed_date"].notna().any())
+    _today = datetime.now().date()
     if _has_dates:
         _min_date = results_df["_parsed_date"].min().date()
         _max_date = results_df["_parsed_date"].max().date()
     else:
-        _min_date = datetime.now().date() - timedelta(days=365)
-        _max_date = datetime.now().date()
+        _min_date = _today - timedelta(days=365)
+        _max_date = _today
+
+    # Clamp any stale session-state values so the date widgets don't error
+    if "results_start_date" in st.session_state:
+        st.session_state.results_start_date = max(_min_date, min(st.session_state.results_start_date, _today))
+    if "results_end_date" in st.session_state:
+        st.session_state.results_end_date = max(_min_date, min(st.session_state.results_end_date, _today))
 
     with date_col1:
-        start_date = st.date_input("Start date", value=_min_date, min_value=_min_date, max_value=_max_date, key="results_start_date")
+        start_date = st.date_input("Start date", value=_min_date, min_value=_min_date, max_value=_today, key="results_start_date")
     with date_col2:
-        end_date = st.date_input("End date", value=_max_date, min_value=_min_date, max_value=_max_date, key="results_end_date")
+        end_date = st.date_input("End date", value=_today, min_value=_min_date, max_value=_today, key="results_end_date")
     with date_col3:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("Reset dates", key="reset_dates"):
             st.session_state.results_start_date = _min_date
-            st.session_state.results_end_date = _max_date
+            st.session_state.results_end_date = _today
             st.rerun()
 
     # Apply date filter to results_df
