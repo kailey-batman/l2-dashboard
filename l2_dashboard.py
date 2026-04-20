@@ -1849,6 +1849,22 @@ with tab1:
         elif confidence_filter == "High (4-5)":
             filtered = filtered[filtered["confidence"] >= 4]
 
+        # ── TEMP DEBUG — remove after diagnosis ─────────────────────
+        with st.expander("🐛 Debug filter trace (temp)", expanded=True):
+            st.write(f"**results_df rows:** {len(results_df)}")
+            st.write(f"**jayson_count (metric card):** {jayson_count}")
+            st.write(f"**metric_filter:** `{st.session_state.get('metric_filter')}`")
+            st.write(f"**chat_filter:** `{st.session_state.get('chat_filter')}`")
+            st.write(f"**filter_option:** `{filter_option!r}`")
+            st.write(f"**filter_category:** `{filter_category!r}`")
+            st.write(f"**confidence_filter:** `{confidence_filter!r}`")
+            st.write(f"**search_query:** `{search_query!r}`")
+            st.write(f"**final filtered rows:** {len(filtered)}")
+            if "l2_engineer" in results_df.columns:
+                st.write("**l2_engineer distribution in results_df:**")
+                st.write(results_df["l2_engineer"].value_counts().to_dict())
+        # ── END TEMP DEBUG ───────────────────────────────────────────
+
         st.markdown(f"**Showing {len(filtered)} of {total} tickets**")
         _sort_col = "_parsed_date" if sort_by == "created_at" and "_parsed_date" in filtered.columns else sort_by
         filtered = filtered.sort_values(
