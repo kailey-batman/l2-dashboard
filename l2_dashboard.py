@@ -1331,11 +1331,11 @@ def _show_chat_dialog():
 # ── Tabs ────────────────────────────────────────────────────────────────────
 _admin_mode = _is_admin()
 if _admin_mode:
-    tab1, tab2, tab3, tab5, tab_admin = st.tabs(
-        ["Results", "Run Analysis", "Trends", "Google Sheet", "Admin"]
+    tab1, tab2, tab3, tab5, tab_bugs, tab_admin = st.tabs(
+        ["Results", "Run Analysis", "Trends", "Google Sheet", "🐛 Bugs", "Admin"]
     )
 else:
-    tab1, tab2, tab3, tab5 = st.tabs(["Results", "Run Analysis", "Trends", "Google Sheet"])
+    tab1, tab2, tab3, tab5, tab_bugs = st.tabs(["Results", "Run Analysis", "Trends", "Google Sheet", "🐛 Bugs"])
     tab_admin = None
 
 # ── Floating chat button (bottom-right corner) ──────────────────────────────
@@ -2424,6 +2424,187 @@ with tab5:
     )
 
     st.markdown(f"[Open in Google Sheets](https://docs.google.com/spreadsheets/d/{GOOGLE_SHEET_ID}/edit?gid=0)")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB BUGS: Shortcut Kanban board (Customer Success bugs)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_SC_BASE = "https://api.app.shortcut.com/api/v3"
+
+def _sc_headers():
+    token = os.environ.get("SHORTCUT_API_TOKEN", "")
+    return {"Shortcut-Token": token, "Content-Type": "application/json"}
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _sc_fetch_workflows():
+    try:
+        r = _http.get(f"{_SC_BASE}/workflows", headers=_sc_headers(), timeout=10)
+        return r.json() if r.status_code == 200 else []
+    except Exception:
+        return []
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _sc_fetch_teams():
+    try:
+        r = _http.get(f"{_SC_BASE}/groups", headers=_sc_headers(), timeout=10)
+        return r.json() if r.status_code == 200 else []
+    except Exception:
+        return []
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _sc_fetch_bugs(team_id=None):
+    """Fetch all bug stories, paginating via cursor. Returns list of story dicts."""
+    stories = []
+    payload = {"story_type": "bug", "page_size": 25}
+    if team_id:
+        payload["group_ids"] = [team_id]
+    try:
+        while True:
+            r = _http.post(f"{_SC_BASE}/stories/search", headers=_sc_headers(),
+                           json=payload, timeout=15)
+            if r.status_code != 200:
+                break
+            data = r.json()
+            batch = data.get("data", [])
+            stories.extend(batch)
+            nxt = data.get("next")
+            if not nxt:
+                break
+            payload["next"] = nxt
+    except Exception:
+        pass
+    return stories
+
+def _sc_priority_badge(story):
+    """Return (label, color) for a story's priority."""
+    # Shortcut stores priority as an integer: 1=Urgent/P1, 2=High/P2, 3=Medium/P3, 4=Low/P4
+    p = story.get("priority") or story.get("story_priority")
+    pmap = {
+        1: ("P1", "#ff5252"), 2: ("P2", "#FF6D00"),
+        3: ("P3", "#FFD740"), 4: ("P4", "#42A5F5"),
+    }
+    if p in pmap:
+        return pmap[p]
+    # fall back to labels named "P1"–"P4"
+    for lbl in story.get("labels", []):
+        name = lbl.get("name", "")
+        for k, v in pmap.items():
+            if name.upper() == f"P{k}":
+                return (f"P{k}", v)
+    return (None, None)
+
+def _sc_kanban_card(story, app_url):
+    label, color = _sc_priority_badge(story)
+    badge = (f'<span style="background:{color};color:#111;font-size:10px;'
+             f'font-weight:700;padding:1px 6px;border-radius:3px;margin-right:6px;">'
+             f'{label}</span>') if label else ""
+    name = story.get("name", "(untitled)")
+    sid  = story.get("id", "")
+    url  = story.get("app_url") or app_url or "#"
+    return (
+        f'<div style="background:#373E47;border:1px solid #444C56;border-radius:8px;'
+        f'padding:10px 12px;margin-bottom:8px;">'
+        f'{badge}'
+        f'<a href="{url}" target="_blank" style="color:#E0E0E0;font-size:13px;'
+        f'text-decoration:none;line-height:1.4;">{name}</a>'
+        f'<div style="color:#636b75;font-size:11px;margin-top:4px;">sc-{sid}</div>'
+        f'</div>'
+    )
+
+# ── Ordered workflow states we care about (fallback names if API differs) ───
+_SC_STATE_ORDER = [
+    "Unscheduled", "Ready for Development", "In Development",
+    "Ready for Review", "In Review", "Completed", "Done",
+]
+_SC_STATE_COLORS = {
+    "Unscheduled":          "#636b75",
+    "Ready for Development":"#42A5F5",
+    "In Development":       "#FFD740",
+    "Ready for Review":     "#FF6D00",
+    "In Review":            "#FF6D00",
+    "Completed":            "#00E676",
+    "Done":                 "#00E676",
+}
+
+with tab_bugs:
+    st.markdown("**Customer Success Bug Tracker**")
+    st.caption("Live from Shortcut · refreshes every 5 min · click any ticket to open in Shortcut")
+
+    _sc_token = os.environ.get("SHORTCUT_API_TOKEN", "")
+    if not _sc_token:
+        st.warning("Set the **SHORTCUT_API_TOKEN** environment variable to enable this tab.")
+    else:
+        # ── Team picker ──────────────────────────────────────────────
+        _teams = _sc_fetch_teams()
+        _team_map = {t["name"]: t["id"] for t in _teams if t.get("name") and t.get("id")}
+        _team_names = sorted(_team_map.keys())
+        _default_team = next((n for n in _team_names if "customer" in n.lower()), None)
+        _default_idx  = _team_names.index(_default_team) if _default_team else 0
+
+        _bugs_col1, _bugs_col2 = st.columns([2, 5])
+        with _bugs_col1:
+            _selected_team = st.selectbox("Team", _team_names, index=_default_idx,
+                                          key="sc_team_picker") if _team_names else None
+        with _bugs_col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("↺ Refresh", key="sc_refresh"):
+                st.cache_data.clear()
+                st.rerun()
+
+        _selected_team_id = _team_map.get(_selected_team) if _selected_team else None
+
+        # ── Fetch bugs ───────────────────────────────────────────────
+        with st.spinner("Loading bugs from Shortcut…"):
+            _bugs = _sc_fetch_bugs(team_id=_selected_team_id)
+
+        # ── Build workflow state lookup ──────────────────────────────
+        _workflows = _sc_fetch_workflows()
+        _state_id_to_name = {}
+        for wf in _workflows:
+            for st_obj in wf.get("states", []):
+                _state_id_to_name[st_obj["id"]] = st_obj["name"]
+
+        # ── Group stories by state ───────────────────────────────────
+        _by_state: dict[str, list] = {}
+        for story in _bugs:
+            sname = _state_id_to_name.get(story.get("workflow_state_id"), "Unscheduled")
+            _by_state.setdefault(sname, []).append(story)
+
+        # Sort states: known order first, then alphabetical for any extras
+        _known = [s for s in _SC_STATE_ORDER if s in _by_state]
+        _extra = sorted(s for s in _by_state if s not in _SC_STATE_ORDER)
+        _ordered_states = _known + _extra
+
+        if not _ordered_states:
+            st.info("No bugs found for this team.")
+        else:
+            # ── Kanban header row ────────────────────────────────────
+            _cols = st.columns(len(_ordered_states))
+            for i, state in enumerate(_ordered_states):
+                count = len(_by_state.get(state, []))
+                color = _SC_STATE_COLORS.get(state, "#636b75")
+                _cols[i].markdown(
+                    f'<div style="border-bottom:3px solid {color};padding-bottom:6px;margin-bottom:12px;">'
+                    f'<span style="color:{color};font-weight:700;font-size:14px;">{state}</span>'
+                    f'<span style="color:#636b75;font-size:13px;margin-left:8px;">{count}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+            # ── Kanban cards ─────────────────────────────────────────
+            _card_cols = st.columns(len(_ordered_states))
+            for i, state in enumerate(_ordered_states):
+                with _card_cols[i]:
+                    state_stories = _by_state.get(state, [])
+                    # Sort by priority (P1 first), then name
+                    state_stories.sort(key=lambda s: (s.get("priority") or 99, s.get("name", "")))
+                    html_cards = "".join(_sc_kanban_card(s, "") for s in state_stories)
+                    st.markdown(
+                        f'<div style="max-height:70vh;overflow-y:auto;padding-right:4px;">'
+                        f'{html_cards}</div>',
+                        unsafe_allow_html=True,
+                    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
