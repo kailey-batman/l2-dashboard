@@ -91,6 +91,14 @@ def _prop(page_props, key, default=None):
     return default
 
 
+def _query_data_source(client, ds_id):
+    """Query a Notion data source. Handles both old (databases.query) and new (data_sources.query) SDK versions."""
+    try:
+        return client.data_sources.query(data_source_id=ds_id).get("results", [])
+    except AttributeError:
+        return client.databases.query(database_id=ds_id).get("results", [])
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_roster_rows():
     """Return list of dicts, one per rep, from the roster DB."""
@@ -98,7 +106,7 @@ def fetch_roster_rows():
     if client is None:
         return []
     try:
-        results = client.databases.query(database_id=ROSTER_DATA_SOURCE_ID).get("results", [])
+        results = _query_data_source(client, ROSTER_DATA_SOURCE_ID)
     except Exception as e:
         st.error(f"Notion roster fetch failed: {e}")
         return []
@@ -127,7 +135,7 @@ def fetch_weekly_history():
     all_rows = []
     for rep_name, ds_id in REP_REPORTS_DS.items():
         try:
-            results = client.databases.query(database_id=ds_id).get("results", [])
+            results = _query_data_source(client, ds_id)
         except Exception:
             continue
         for page in results:
