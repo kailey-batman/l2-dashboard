@@ -1429,75 +1429,72 @@ if _active_tab not in _valid_tabs:
 def _nav_cls(tab_id: str) -> str:
     return "cst-item active" if _active_tab == tab_id else "cst-item"
 
-# ── Fixed vertical sidebar (same pattern as epdfeedback.com) ─────────────────
-# Manager section — only rendered for coaching leads
-_manager_links = f"""
-    <div class="cst-sep"></div>
-    <a href="?tab=manager" target="_self" class="{_nav_cls('manager')}">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-        <circle cx="9" cy="7" r="4"/>
-        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-      </svg>
-      L2 Coaching
-    </a>
-    <a href="?tab=coaching" target="_self" class="{_nav_cls('coaching')}">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
-        <path d="M6 12v5c3 3 9 3 12 0v-5"/>
-      </svg>
-      L1 Coaching
-    </a>
-""" if _coaching_mode else ""
+# ── Fixed vertical sidebar — built as a single Python string then injected
+# via st.html() to bypass Streamlit's markdown processor, which otherwise
+# escapes dynamically-concatenated HTML chunks as raw text.
+# ─────────────────────────────────────────────────────────────────────────────
+_ICO = 'width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'
 
-_admin_link = f"""
-    <div class="cst-sep"></div>
-    <a href="?tab=admin" target="_self" class="{_nav_cls('admin')}">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-      </svg>
-      Admin
-    </a>
-""" if _admin_mode else ""
+_sb = []
+_sb.append('<div class="cst-sidebar">')
+_sb.append(
+    '<div class="cst-logo">'
+    f'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
+    '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'
+    'Escalation</div>'
+)
+_sb.append('<nav class="cst-nav">')
 
-st.markdown(f"""
-<div class="cst-sidebar">
-  <div class="cst-logo">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-    </svg>
-    Escalation
-  </div>
-  <nav class="cst-nav">
-    <a href="?tab=results" target="_self" class="{_nav_cls('results')}">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/>
-        <line x1="6" y1="20" x2="6" y2="14"/>
-      </svg>
-      Results
-    </a>
-    <a href="?tab=trends" target="_self" class="{_nav_cls('trends')}">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
-        <polyline points="17 6 23 6 23 12"/>
-      </svg>
-      Trends
-    </a>
-    <a href="?tab=reps" target="_self" class="{_nav_cls('reps')}">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10"/>
-        <circle cx="12" cy="12" r="6"/>
-        <circle cx="12" cy="12" r="2"/>
-      </svg>
-      L2 Reps
-    </a>
-    {_manager_links}
-    {_admin_link}
-  </nav>
-</div>
-""", unsafe_allow_html=True)
+# ── Public items ────────────────────────────────────────────────────────────
+_sb.append(
+    f'<a href="?tab=results" target="_self" class="{_nav_cls("results")}">'
+    f'<svg {_ICO}><line x1="18" y1="20" x2="18" y2="10"/>'
+    '<line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>'
+    'Results</a>'
+)
+_sb.append(
+    f'<a href="?tab=trends" target="_self" class="{_nav_cls("trends")}">'
+    f'<svg {_ICO}><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>'
+    '<polyline points="17 6 23 6 23 12"/></svg>'
+    'Trends</a>'
+)
+_sb.append(
+    f'<a href="?tab=reps" target="_self" class="{_nav_cls("reps")}">'
+    f'<svg {_ICO}><circle cx="12" cy="12" r="10"/>'
+    '<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>'
+    'L2 Reps</a>'
+)
+
+# ── Manager items (coaching leads only) ────────────────────────────────────
+if _coaching_mode:
+    _sb.append('<div class="cst-sep"></div>')
+    _sb.append(
+        f'<a href="?tab=manager" target="_self" class="{_nav_cls("manager")}">'
+        f'<svg {_ICO}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>'
+        '<circle cx="9" cy="7" r="4"/>'
+        '<path d="M23 21v-2a4 4 0 0 0-3-3.87"/>'
+        '<path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
+        'L2 Coaching</a>'
+    )
+    _sb.append(
+        f'<a href="?tab=coaching" target="_self" class="{_nav_cls("coaching")}">'
+        f'<svg {_ICO}><path d="M22 10v6M2 10l10-5 10 5-10 5z"/>'
+        '<path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>'
+        'L1 Coaching</a>'
+    )
+
+# ── Admin item ──────────────────────────────────────────────────────────────
+if _admin_mode:
+    _sb.append('<div class="cst-sep"></div>')
+    _sb.append(
+        f'<a href="?tab=admin" target="_self" class="{_nav_cls("admin")}">'
+        f'<svg {_ICO}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>'
+        '<path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
+        'Admin</a>'
+    )
+
+_sb.append('</nav></div>')
+st.html("".join(_sb))
 
 # ── Floating chat button (bottom-right corner) ──────────────────────────────
 st.markdown("""
