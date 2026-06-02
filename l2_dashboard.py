@@ -1087,7 +1087,7 @@ def _load_activity_log():
 
 
 # ── Page Config ─────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Escalation Tracker", page_icon="logo.svg", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Escalation Tracker", page_icon="logo.svg", layout="wide")
 
 # ── Restore session from cookie ──────────────────────────────────────────────
 if not st.session_state.get("_auth_user"):
@@ -1375,94 +1375,23 @@ def _show_chat_dialog():
 _admin_mode = _is_admin()
 _coaching_mode = _is_coaching_lead()
 
-# ── Sidebar navigation ──────────────────────────────────────────────────────
-_NAV_ALWAYS = [
-    ("📊", "Results"),
-    ("📈", "Trends"),
-    ("🏆", "L2 Manager"),
-    ("🎯", "L2 Reps"),
-]
-_NAV_COACHING = [("👥", "Coaching")]
-_NAV_ADMIN = [
-    ("⚙️", "Run Analysis"),
-    ("🐛", "Bugs"),
-    ("📋", "Google Sheet"),
-    ("🔐", "Admin"),
-]
-
-_all_nav = list(_NAV_ALWAYS)
+# ── Tab navigation ──────────────────────────────────────────────────────────
+_base_tabs = ["📊 Results", "📈 Trends", "🏆 L2 Manager", "🎯 L2 Reps"]
 if _coaching_mode:
-    _all_nav += _NAV_COACHING
+    _base_tabs.append("👥 Coaching")
 if _admin_mode:
-    _all_nav += _NAV_ADMIN
+    _base_tabs.append("🔐 Admin")
 
-_valid_pages = [label for _, label in _all_nav]
-
-if "_active_page" not in st.session_state or st.session_state._active_page not in _valid_pages:
-    st.session_state._active_page = "Results"
-
-# Sidebar CSS — dark left nav, always visible
-st.markdown("""
-<style>
-/* ── Force sidebar permanently open — override Streamlit's translateX collapse ── */
-section[data-testid="stSidebar"] {
-    display: block !important;
-    visibility: visible !important;
-    transform: none !important;
-    transition: none !important;
-    background: #0f172a !important;
-    min-width: 220px !important;
-    max-width: 220px !important;
-    width: 220px !important;
-    z-index: 100;
-}
-section[data-testid="stSidebar"] > div:first-child {
-    padding-top: 0 !important;
-}
-/* Hide the collapse/expand toggle buttons entirely */
-[data-testid="stSidebarCollapseButton"],
-[data-testid="collapsedControl"],
-button[kind="header"] { display: none !important; }
-
-/* ── Radio nav — minimal safe styling ── */
-/* Tighten spacing between options */
-section[data-testid="stSidebar"] .stRadio > div > div { gap: 4px !important; }
-/* Style each option row */
-section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label {
-    padding: 8px 10px !important;
-    border-radius: 8px !important;
-    color: #94a3b8 !important;
-    font-size: 14px !important;
-}
-section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:hover {
-    background: #1e293b !important;
-    color: #e2e8f0 !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-with st.sidebar:
-    st.markdown(
-        '<div style="padding:16px 14px 12px;border-bottom:1px solid rgba(255,255,255,0.06);'
-        'font-size:15px;font-weight:700;color:#e2e8f0;letter-spacing:-0.02em;margin-bottom:8px;">L2 Dashboard</div>',
-        unsafe_allow_html=True,
-    )
-
-    _icon_map = {label: icon for icon, label in _all_nav}
-
-    _selected = st.radio(
-        "nav",
-        [label for _, label in _all_nav],
-        format_func=lambda x: f"{_icon_map[x]}  {x}",
-        index=_valid_pages.index(st.session_state._active_page) if st.session_state._active_page in _valid_pages else 0,
-        label_visibility="collapsed",
-        key="_nav_radio",
-    )
-    if _selected != st.session_state._active_page:
-        st.session_state._active_page = _selected
-        st.rerun()
-
-_page = st.session_state._active_page
+_tab_handles = st.tabs(_base_tabs)
+tab_results  = _tab_handles[0]
+tab_trends   = _tab_handles[1]
+tab_manager  = _tab_handles[2]
+tab_rep      = _tab_handles[3]
+_next_idx = 4
+tab_coaching = _tab_handles[_next_idx] if _coaching_mode else None
+if _coaching_mode:
+    _next_idx += 1
+tab_admin = _tab_handles[_next_idx] if _admin_mode else None
 
 # ── Floating chat button (bottom-right corner) ──────────────────────────────
 st.markdown("""
@@ -1493,7 +1422,7 @@ with st.container():
 # ═══════════════════════════════════════════════════════════════════════════
 # PAGE — RESULTS
 # ═══════════════════════════════════════════════════════════════════════════
-if _page == "Results":
+with tab_results:
     results_df = _filter_archived(load_results())
     overrides = load_overrides()
 
@@ -2223,101 +2152,9 @@ if _page == "Results":
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PAGE — RUN ANALYSIS (admin only)
-# ═══════════════════════════════════════════════════════════════════════════
-if _page == "Run Analysis":
-    st.subheader("Run New Analysis")
-
-    # Check if analysis is already running
-    current_progress = get_analysis_progress()
-    is_running = current_progress and current_progress.get("status") == "running"
-
-    if is_running:
-        prog = current_progress
-        st.warning(f"Analysis is already running: [{prog['current']}/{prog['total']}] {prog['ticket_name'][:60]}")
-        st.progress(prog["current"] / prog["total"] if prog["total"] > 0 else 0)
-        if st.button("Cancel Analysis"):
-            clear_analysis_progress()
-            st.rerun()
-    else:
-        max_rows = st.number_input("Max rows to process (0 = all)", min_value=0, value=10, step=5)
-
-        rerun_all = st.checkbox("Re-analyze all tickets (ignore previous results)", value=False)
-
-        data_source = st.radio(
-            "Data source:",
-            ["Google Sheet (live in railway)", "Upload CSV"],
-            horizontal=True,
-        )
-
-        uploaded = None
-        if data_source == "Upload CSV":
-            uploaded = st.file_uploader("Upload a CSV file with ticket data", type=["csv"])
-
-        if data_source == "Google Sheet (live in railway)":
-            sheet_df = load_google_sheet()
-            if sheet_df is not None:
-                st.success(f"Connected to Google Sheet: **{len(sheet_df)} rows** found")
-                with st.expander("Preview sheet data"):
-                    st.dataframe(sheet_df.head(5), use_container_width=True)
-            else:
-                st.error("Could not connect to Google Sheet. Make sure the sheet is shared with the service account.")
-
-        if st.button("Run Analysis", type="primary"):
-            rows = []
-            if data_source == "Google Sheet (live in railway)":
-                sheet_df = load_google_sheet()
-                if sheet_df is not None:
-                    rows = sheet_df.to_dict("records")
-                else:
-                    st.error("Could not load Google Sheet.")
-            elif uploaded:
-                raw = uploaded.read().decode("utf-8-sig")
-                reader = csv.DictReader(raw.splitlines())
-                rows = list(reader)
-            else:
-                st.error("No file provided.")
-
-            if rows:
-                # Load existing results from sheet (or local fallback)
-                existing_results = []
-                if not rerun_all:
-                    df_existing = load_results()
-                    if df_existing is not None and not df_existing.empty:
-                        existing_results = df_existing.to_dict("records")
-
-                # Check how many are new — apply max_rows AFTER filtering so bottom rows aren't excluded
-                analyzed_names = {r["name"].strip() for r in existing_results}
-                if rerun_all:
-                    rows_to_analyze = rows[:max_rows] if max_rows > 0 else rows
-                    new_count = len(rows_to_analyze)
-                else:
-                    new_rows = [r for r in rows if r.get("name", "").strip() not in analyzed_names]
-                    if max_rows > 0:
-                        new_rows = new_rows[:max_rows]
-                    new_count = len(new_rows)
-                    rows_to_analyze = [r for r in rows if r.get("name", "").strip() in analyzed_names] + new_rows
-
-                if new_count == 0 and not rerun_all:
-                    st.info("All tickets have already been analyzed. Check 'Re-analyze all' to rerun.")
-                else:
-                    # Launch background thread
-                    set_analysis_progress(0, new_count, "Starting...", status="running")
-                    thread = threading.Thread(
-                        target=run_analysis_background,
-                        args=(rows_to_analyze, existing_results, rerun_all),
-                        daemon=True,
-                    )
-                    thread.start()
-                    st.success(f"Analysis started in background: {new_count} tickets to process. You can refresh or switch tabs — progress is shown at the top of the page.")
-                    time.sleep(1)
-                    st.rerun()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # PAGE — TRENDS
 # ═══════════════════════════════════════════════════════════════════════════
-if _page == "Trends":
+with tab_trends:
     st.subheader("Trends & Insights")
 
     trends_df = _filter_archived(load_results())
@@ -2537,22 +2374,6 @@ if _page == "Trends":
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PAGE — GOOGLE SHEET (admin only)
-# ═══════════════════════════════════════════════════════════════════════════
-if _page == "Google Sheet":
-    st.subheader("Live Google Sheet")
-    st.markdown("Edit the ticket data directly in the embedded Google Sheet below. Changes are saved automatically to the sheet.")
-
-    st.components.v1.iframe(
-        GOOGLE_SHEET_EMBED_URL,
-        height=800,
-        scrolling=True,
-    )
-
-    st.markdown(f"[Open in Google Sheets](https://docs.google.com/spreadsheets/d/{GOOGLE_SHEET_ID}/edit?gid=0)")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # TAB BUGS: Shortcut Kanban board (Customer Success bugs)
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -2653,86 +2474,6 @@ _SC_STATE_COLORS = {
     "Done":                 "#00E676",
 }
 
-if _page == "Bugs":
-    st.markdown("**Customer Success Bug Tracker**")
-    st.caption("Live from Shortcut · refreshes every 5 min · click any ticket to open in Shortcut")
-
-    _sc_token = os.environ.get("SHORTCUT_API_TOKEN", "")
-    if not _sc_token:
-        st.warning("Set the **SHORTCUT_API_TOKEN** environment variable to enable this tab.")
-    else:
-        # ── Team picker ──────────────────────────────────────────────
-        _teams = _sc_fetch_teams()
-        _team_map = {t["name"]: t["id"] for t in _teams if t.get("name") and t.get("id")}
-        _team_names = sorted(_team_map.keys())
-        _default_team = next((n for n in _team_names if "customer" in n.lower()), None)
-        _default_idx  = _team_names.index(_default_team) if _default_team else 0
-
-        _bugs_col1, _bugs_col2 = st.columns([2, 5])
-        with _bugs_col1:
-            _selected_team = st.selectbox("Team", _team_names, index=_default_idx,
-                                          key="sc_team_picker") if _team_names else None
-        with _bugs_col2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("↺ Refresh", key="sc_refresh"):
-                st.cache_data.clear()
-                st.rerun()
-
-        _selected_team_id = _team_map.get(_selected_team) if _selected_team else None
-
-        # ── Fetch bugs ───────────────────────────────────────────────
-        with st.spinner("Loading bugs from Shortcut…"):
-            _bugs = _sc_fetch_bugs(team_id=_selected_team_id)
-
-        # ── Build workflow state lookup ──────────────────────────────
-        _workflows = _sc_fetch_workflows()
-        _state_id_to_name = {}
-        for wf in _workflows:
-            for st_obj in wf.get("states", []):
-                _state_id_to_name[st_obj["id"]] = st_obj["name"]
-
-        # ── Group stories by state ───────────────────────────────────
-        _by_state: dict[str, list] = {}
-        for story in _bugs:
-            sname = _state_id_to_name.get(story.get("workflow_state_id"), "Unscheduled")
-            _by_state.setdefault(sname, []).append(story)
-
-        # Sort states: known order first, then alphabetical for any extras
-        _known = [s for s in _SC_STATE_ORDER if s in _by_state]
-        _extra = sorted(s for s in _by_state if s not in _SC_STATE_ORDER)
-        _ordered_states = _known + _extra
-
-        if not _ordered_states:
-            st.info("No bugs found for this team.")
-        else:
-            # ── Kanban header row ────────────────────────────────────
-            _cols = st.columns(len(_ordered_states))
-            for i, state in enumerate(_ordered_states):
-                count = len(_by_state.get(state, []))
-                color = _SC_STATE_COLORS.get(state, "#636b75")
-                _cols[i].markdown(
-                    f'<div style="border-bottom:3px solid {color};padding-bottom:6px;margin-bottom:12px;">'
-                    f'<span style="color:{color};font-weight:700;font-size:14px;">{state}</span>'
-                    f'<span style="color:#636b75;font-size:13px;margin-left:8px;">{count}</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-            # ── Kanban cards ─────────────────────────────────────────
-            _card_cols = st.columns(len(_ordered_states))
-            for i, state in enumerate(_ordered_states):
-                with _card_cols[i]:
-                    state_stories = _by_state.get(state, [])
-                    # Sort by priority (P1 first), then name
-                    state_stories.sort(key=lambda s: (s.get("priority") or 99, s.get("name", "")))
-                    html_cards = "".join(_sc_kanban_card(s, "") for s in state_stories)
-                    st.markdown(
-                        f'<div style="max-height:70vh;overflow-y:auto;padding-right:4px;">'
-                        f'{html_cards}</div>',
-                        unsafe_allow_html=True,
-                    )
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # HELPER — build coaching DataFrame from live results_df
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2790,7 +2531,7 @@ def _prepare_l2_coaching_df():
 # ═══════════════════════════════════════════════════════════════════════════
 # PAGE — L2 MANAGER
 # ═══════════════════════════════════════════════════════════════════════════
-if _page == "L2 Manager":
+with tab_manager:
     _coaching_df = _prepare_l2_coaching_df()
     l2_coaching_tab.render_manager(_coaching_df)
 
@@ -2798,7 +2539,7 @@ if _page == "L2 Manager":
 # ═══════════════════════════════════════════════════════════════════════════
 # PAGE — L2 REPS
 # ═══════════════════════════════════════════════════════════════════════════
-if _page == "L2 Reps":
+with tab_rep:
     _coaching_df = _prepare_l2_coaching_df()
     l2_coaching_tab.render_rep(_coaching_df)
 
@@ -2806,146 +2547,331 @@ if _page == "L2 Reps":
 # ═══════════════════════════════════════════════════════════════════════════
 # PAGE — COACHING (coaching leads only — Kailey + Ricky)
 # ═══════════════════════════════════════════════════════════════════════════
-if _page == "Coaching" and _coaching_mode:
-    coaching_tab.render()
+if _coaching_mode and tab_coaching is not None:
+    with tab_coaching:
+        coaching_tab.render()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # PAGE — ADMIN (admin users only)
 # ═══════════════════════════════════════════════════════════════════════════
-if _page == "Admin" and _admin_mode:
-    st.subheader("Access Log")
-    st.markdown("Every time a user authenticates, their login is recorded here.")
+if _admin_mode and tab_admin is not None:
+    with tab_admin:
+        _admin_subtabs = st.tabs(["📋 Logs", "⚙️ Run Analysis", "🐛 Bugs", "🗒️ Google Sheet"])
+        tab_adm_logs, tab_adm_run, tab_adm_bugs, tab_adm_sheet = _admin_subtabs
 
-    log_df = _load_access_log()
+        with tab_adm_logs:
+            st.subheader("Access Log")
+            st.markdown("Every time a user authenticates, their login is recorded here.")
 
-    if log_df.empty:
-        st.info("No visits recorded yet. Logs are written when users sign in.")
-    else:
-        # Ensure consistent column naming
-        log_df.columns = [c.capitalize() for c in log_df.columns]
-        if "Timestamp" in log_df.columns:
-            log_df["Timestamp"] = pd.to_datetime(log_df["Timestamp"], errors="coerce")
-            log_df = log_df.sort_values("Timestamp", ascending=False).reset_index(drop=True)
-            log_df["Timestamp"] = log_df["Timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
+            log_df = _load_access_log()
 
-        # Summary metrics
-        total_visits = len(log_df)
-        unique_users = log_df["Email"].nunique() if "Email" in log_df.columns else 0
-        m1, m2 = st.columns(2)
-        m1.metric("Total logins", total_visits)
-        m2.metric("Unique users", unique_users)
-
-        st.divider()
-
-        # Per-user breakdown
-        if "Email" in log_df.columns:
-            st.markdown("**Logins per user**")
-            counts = (
-                log_df.groupby("Email")
-                .agg(Logins=("Email", "count"), Last_seen=("Timestamp", "max"))
-                .reset_index()
-                .rename(columns={"Last_seen": "Last seen"})
-                .sort_values("Logins", ascending=False)
-            )
-            st.dataframe(counts, use_container_width=True, hide_index=True)
-
-            st.divider()
-
-        # Full log
-        st.markdown("**Full login history**")
-        st.dataframe(log_df, use_container_width=True, hide_index=True)
-
-    # ── Activity Tracking ────────────────────────────────────────
-    st.divider()
-    st.subheader("Activity Tracking")
-    st.markdown("Session-level tracking: who visited, when, and for how long.")
-
-    activity_df = _load_activity_log()
-    if activity_df.empty:
-        st.info("No activity recorded yet. Activity is tracked automatically for authenticated users.")
-    else:
-        # Normalize columns
-        col_remap = {}
-        for c in activity_df.columns:
-            cl = c.lower().replace(" ", "_").replace("(", "").replace(")", "")
-            if "session" in cl:
-                col_remap[c] = "Session ID"
-            elif "email" in cl:
-                col_remap[c] = "Email"
-            elif "name" in cl and "session" not in cl:
-                col_remap[c] = "Name"
-            elif "start" in cl:
-                col_remap[c] = "Start"
-            elif "last" in cl:
-                col_remap[c] = "Last Active"
-            elif "duration" in cl:
-                col_remap[c] = "Duration (min)"
-        activity_df = activity_df.rename(columns=col_remap)
-
-        if "Last Active" in activity_df.columns:
-            activity_df["Last Active"] = pd.to_datetime(activity_df["Last Active"], errors="coerce")
-        if "Start" in activity_df.columns:
-            activity_df["Start"] = pd.to_datetime(activity_df["Start"], errors="coerce")
-        if "Duration (min)" in activity_df.columns:
-            activity_df["Duration (min)"] = pd.to_numeric(activity_df["Duration (min)"], errors="coerce")
-
-        # Currently active users (heartbeat within last 2 minutes)
-        if "Last Active" in activity_df.columns:
-            now = datetime.now()
-            active = activity_df[activity_df["Last Active"] >= now - timedelta(minutes=2)]
-            st.markdown("**Currently active**")
-            if active.empty:
-                st.caption("No users currently active.")
+            if log_df.empty:
+                st.info("No visits recorded yet. Logs are written when users sign in.")
             else:
-                for _, row in active.iterrows():
-                    label = row.get("Name") or row.get("Email", "Unknown")
-                    dur = row.get("Duration (min)", 0)
-                    st.markdown(f"🟢 **{label}** — active for {dur:.0f} min")
+                # Ensure consistent column naming
+                log_df.columns = [c.capitalize() for c in log_df.columns]
+                if "Timestamp" in log_df.columns:
+                    log_df["Timestamp"] = pd.to_datetime(log_df["Timestamp"], errors="coerce")
+                    log_df = log_df.sort_values("Timestamp", ascending=False).reset_index(drop=True)
+                    log_df["Timestamp"] = log_df["Timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
-        st.divider()
+                # Summary metrics
+                total_visits = len(log_df)
+                unique_users = log_df["Email"].nunique() if "Email" in log_df.columns else 0
+                m1, m2 = st.columns(2)
+                m1.metric("Total logins", total_visits)
+                m2.metric("Unique users", unique_users)
 
-        # Summary metrics
-        total_sessions = len(activity_df)
-        unique_visitors = activity_df["Email"].nunique() if "Email" in activity_df.columns else 0
-        avg_duration = activity_df["Duration (min)"].mean() if "Duration (min)" in activity_df.columns else 0
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total sessions", total_sessions)
-        m2.metric("Unique visitors", unique_visitors)
-        m3.metric("Avg duration (min)", f"{avg_duration:.1f}")
+                st.divider()
 
-        st.divider()
+                # Per-user breakdown
+                if "Email" in log_df.columns:
+                    st.markdown("**Logins per user**")
+                    counts = (
+                        log_df.groupby("Email")
+                        .agg(Logins=("Email", "count"), Last_seen=("Timestamp", "max"))
+                        .reset_index()
+                        .rename(columns={"Last_seen": "Last seen"})
+                        .sort_values("Logins", ascending=False)
+                    )
+                    st.dataframe(counts, use_container_width=True, hide_index=True)
 
-        # Per-user usage breakdown
-        if "Email" in activity_df.columns and "Duration (min)" in activity_df.columns:
-            st.markdown("**Usage per user**")
-            la_col = "Last Active" if "Last Active" in activity_df.columns else "Start"
-            user_stats = (
-                activity_df.groupby("Email")
-                .agg(
-                    Sessions=("Email", "count"),
-                    Total_min=("Duration (min)", "sum"),
-                    Avg_min=("Duration (min)", "mean"),
-                    Last_visit=(la_col, "max"),
-                )
-                .reset_index()
-                .rename(columns={"Total_min": "Total (min)", "Avg_min": "Avg (min)", "Last_visit": "Last visit"})
-                .sort_values("Total (min)", ascending=False)
-            )
-            user_stats["Total (min)"] = user_stats["Total (min)"].round(1)
-            user_stats["Avg (min)"] = user_stats["Avg (min)"].round(1)
-            if "Last visit" in user_stats.columns:
-                user_stats["Last visit"] = user_stats["Last visit"].dt.strftime("%Y-%m-%d %H:%M:%S")
-            st.dataframe(user_stats, use_container_width=True, hide_index=True)
+                    st.divider()
+
+                # Full log
+                st.markdown("**Full login history**")
+                st.dataframe(log_df, use_container_width=True, hide_index=True)
+
+            # ── Activity Tracking ────────────────────────────────────────
             st.divider()
+            st.subheader("Activity Tracking")
+            st.markdown("Session-level tracking: who visited, when, and for how long.")
 
-        # Full session history
-        st.markdown("**Full session history**")
-        display_df = activity_df.sort_values("Start", ascending=False).reset_index(drop=True) if "Start" in activity_df.columns else activity_df
-        fmt_df = display_df.copy()
-        for col in ["Start", "Last Active"]:
-            if col in fmt_df.columns:
-                fmt_df[col] = fmt_df[col].dt.strftime("%Y-%m-%d %H:%M:%S")
-        if "Duration (min)" in fmt_df.columns:
-            fmt_df["Duration (min)"] = fmt_df["Duration (min)"].round(1)
-        st.dataframe(fmt_df, use_container_width=True, hide_index=True)
+            activity_df = _load_activity_log()
+            if activity_df.empty:
+                st.info("No activity recorded yet. Activity is tracked automatically for authenticated users.")
+            else:
+                # Normalize columns
+                col_remap = {}
+                for c in activity_df.columns:
+                    cl = c.lower().replace(" ", "_").replace("(", "").replace(")", "")
+                    if "session" in cl:
+                        col_remap[c] = "Session ID"
+                    elif "email" in cl:
+                        col_remap[c] = "Email"
+                    elif "name" in cl and "session" not in cl:
+                        col_remap[c] = "Name"
+                    elif "start" in cl:
+                        col_remap[c] = "Start"
+                    elif "last" in cl:
+                        col_remap[c] = "Last Active"
+                    elif "duration" in cl:
+                        col_remap[c] = "Duration (min)"
+                activity_df = activity_df.rename(columns=col_remap)
+
+                if "Last Active" in activity_df.columns:
+                    activity_df["Last Active"] = pd.to_datetime(activity_df["Last Active"], errors="coerce")
+                if "Start" in activity_df.columns:
+                    activity_df["Start"] = pd.to_datetime(activity_df["Start"], errors="coerce")
+                if "Duration (min)" in activity_df.columns:
+                    activity_df["Duration (min)"] = pd.to_numeric(activity_df["Duration (min)"], errors="coerce")
+
+                # Currently active users (heartbeat within last 2 minutes)
+                if "Last Active" in activity_df.columns:
+                    now = datetime.now()
+                    active = activity_df[activity_df["Last Active"] >= now - timedelta(minutes=2)]
+                    st.markdown("**Currently active**")
+                    if active.empty:
+                        st.caption("No users currently active.")
+                    else:
+                        for _, row in active.iterrows():
+                            label = row.get("Name") or row.get("Email", "Unknown")
+                            dur = row.get("Duration (min)", 0)
+                            st.markdown(f"🟢 **{label}** — active for {dur:.0f} min")
+
+                st.divider()
+
+                # Summary metrics
+                total_sessions = len(activity_df)
+                unique_visitors = activity_df["Email"].nunique() if "Email" in activity_df.columns else 0
+                avg_duration = activity_df["Duration (min)"].mean() if "Duration (min)" in activity_df.columns else 0
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Total sessions", total_sessions)
+                m2.metric("Unique visitors", unique_visitors)
+                m3.metric("Avg duration (min)", f"{avg_duration:.1f}")
+
+                st.divider()
+
+                # Per-user usage breakdown
+                if "Email" in activity_df.columns and "Duration (min)" in activity_df.columns:
+                    st.markdown("**Usage per user**")
+                    la_col = "Last Active" if "Last Active" in activity_df.columns else "Start"
+                    user_stats = (
+                        activity_df.groupby("Email")
+                        .agg(
+                            Sessions=("Email", "count"),
+                            Total_min=("Duration (min)", "sum"),
+                            Avg_min=("Duration (min)", "mean"),
+                            Last_visit=(la_col, "max"),
+                        )
+                        .reset_index()
+                        .rename(columns={"Total_min": "Total (min)", "Avg_min": "Avg (min)", "Last_visit": "Last visit"})
+                        .sort_values("Total (min)", ascending=False)
+                    )
+                    user_stats["Total (min)"] = user_stats["Total (min)"].round(1)
+                    user_stats["Avg (min)"] = user_stats["Avg (min)"].round(1)
+                    if "Last visit" in user_stats.columns:
+                        user_stats["Last visit"] = user_stats["Last visit"].dt.strftime("%Y-%m-%d %H:%M:%S")
+                    st.dataframe(user_stats, use_container_width=True, hide_index=True)
+                    st.divider()
+
+                # Full session history
+                st.markdown("**Full session history**")
+                display_df = activity_df.sort_values("Start", ascending=False).reset_index(drop=True) if "Start" in activity_df.columns else activity_df
+                fmt_df = display_df.copy()
+                for col in ["Start", "Last Active"]:
+                    if col in fmt_df.columns:
+                        fmt_df[col] = fmt_df[col].dt.strftime("%Y-%m-%d %H:%M:%S")
+                if "Duration (min)" in fmt_df.columns:
+                    fmt_df["Duration (min)"] = fmt_df["Duration (min)"].round(1)
+                st.dataframe(fmt_df, use_container_width=True, hide_index=True)
+
+        with tab_adm_run:
+            st.subheader("Run New Analysis")
+
+            # Check if analysis is already running
+            current_progress = get_analysis_progress()
+            is_running = current_progress and current_progress.get("status") == "running"
+
+            if is_running:
+                prog = current_progress
+                st.warning(f"Analysis is already running: [{prog['current']}/{prog['total']}] {prog['ticket_name'][:60]}")
+                st.progress(prog["current"] / prog["total"] if prog["total"] > 0 else 0)
+                if st.button("Cancel Analysis"):
+                    clear_analysis_progress()
+                    st.rerun()
+            else:
+                max_rows = st.number_input("Max rows to process (0 = all)", min_value=0, value=10, step=5)
+
+                rerun_all = st.checkbox("Re-analyze all tickets (ignore previous results)", value=False)
+
+                data_source = st.radio(
+                    "Data source:",
+                    ["Google Sheet (live in railway)", "Upload CSV"],
+                    horizontal=True,
+                )
+
+                uploaded = None
+                if data_source == "Upload CSV":
+                    uploaded = st.file_uploader("Upload a CSV file with ticket data", type=["csv"])
+
+                if data_source == "Google Sheet (live in railway)":
+                    sheet_df = load_google_sheet()
+                    if sheet_df is not None:
+                        st.success(f"Connected to Google Sheet: **{len(sheet_df)} rows** found")
+                        with st.expander("Preview sheet data"):
+                            st.dataframe(sheet_df.head(5), use_container_width=True)
+                    else:
+                        st.error("Could not connect to Google Sheet. Make sure the sheet is shared with the service account.")
+
+                if st.button("Run Analysis", type="primary"):
+                    rows = []
+                    if data_source == "Google Sheet (live in railway)":
+                        sheet_df = load_google_sheet()
+                        if sheet_df is not None:
+                            rows = sheet_df.to_dict("records")
+                        else:
+                            st.error("Could not load Google Sheet.")
+                    elif uploaded:
+                        raw = uploaded.read().decode("utf-8-sig")
+                        reader = csv.DictReader(raw.splitlines())
+                        rows = list(reader)
+                    else:
+                        st.error("No file provided.")
+
+                    if rows:
+                        # Load existing results from sheet (or local fallback)
+                        existing_results = []
+                        if not rerun_all:
+                            df_existing = load_results()
+                            if df_existing is not None and not df_existing.empty:
+                                existing_results = df_existing.to_dict("records")
+
+                        # Check how many are new — apply max_rows AFTER filtering so bottom rows aren't excluded
+                        analyzed_names = {r["name"].strip() for r in existing_results}
+                        if rerun_all:
+                            rows_to_analyze = rows[:max_rows] if max_rows > 0 else rows
+                            new_count = len(rows_to_analyze)
+                        else:
+                            new_rows = [r for r in rows if r.get("name", "").strip() not in analyzed_names]
+                            if max_rows > 0:
+                                new_rows = new_rows[:max_rows]
+                            new_count = len(new_rows)
+                            rows_to_analyze = [r for r in rows if r.get("name", "").strip() in analyzed_names] + new_rows
+
+                        if new_count == 0 and not rerun_all:
+                            st.info("All tickets have already been analyzed. Check 'Re-analyze all' to rerun.")
+                        else:
+                            # Launch background thread
+                            set_analysis_progress(0, new_count, "Starting...", status="running")
+                            thread = threading.Thread(
+                                target=run_analysis_background,
+                                args=(rows_to_analyze, existing_results, rerun_all),
+                                daemon=True,
+                            )
+                            thread.start()
+                            st.success(f"Analysis started in background: {new_count} tickets to process. You can refresh or switch tabs — progress is shown at the top of the page.")
+                            time.sleep(1)
+                            st.rerun()
+
+        with tab_adm_bugs:
+            st.markdown("**Customer Success Bug Tracker**")
+            st.caption("Live from Shortcut · refreshes every 5 min · click any ticket to open in Shortcut")
+
+            _sc_token = os.environ.get("SHORTCUT_API_TOKEN", "")
+            if not _sc_token:
+                st.warning("Set the **SHORTCUT_API_TOKEN** environment variable to enable this tab.")
+            else:
+                # ── Team picker ──────────────────────────────────────────────
+                _teams = _sc_fetch_teams()
+                _team_map = {t["name"]: t["id"] for t in _teams if t.get("name") and t.get("id")}
+                _team_names = sorted(_team_map.keys())
+                _default_team = next((n for n in _team_names if "customer" in n.lower()), None)
+                _default_idx  = _team_names.index(_default_team) if _default_team else 0
+
+                _bugs_col1, _bugs_col2 = st.columns([2, 5])
+                with _bugs_col1:
+                    _selected_team = st.selectbox("Team", _team_names, index=_default_idx,
+                                                  key="sc_team_picker") if _team_names else None
+                with _bugs_col2:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("↺ Refresh", key="sc_refresh"):
+                        st.cache_data.clear()
+                        st.rerun()
+
+                _selected_team_id = _team_map.get(_selected_team) if _selected_team else None
+
+                # ── Fetch bugs ───────────────────────────────────────────────
+                with st.spinner("Loading bugs from Shortcut…"):
+                    _bugs = _sc_fetch_bugs(team_id=_selected_team_id)
+
+                # ── Build workflow state lookup ──────────────────────────────
+                _workflows = _sc_fetch_workflows()
+                _state_id_to_name = {}
+                for wf in _workflows:
+                    for st_obj in wf.get("states", []):
+                        _state_id_to_name[st_obj["id"]] = st_obj["name"]
+
+                # ── Group stories by state ───────────────────────────────────
+                _by_state: dict[str, list] = {}
+                for story in _bugs:
+                    sname = _state_id_to_name.get(story.get("workflow_state_id"), "Unscheduled")
+                    _by_state.setdefault(sname, []).append(story)
+
+                # Sort states: known order first, then alphabetical for any extras
+                _known = [s for s in _SC_STATE_ORDER if s in _by_state]
+                _extra = sorted(s for s in _by_state if s not in _SC_STATE_ORDER)
+                _ordered_states = _known + _extra
+
+                if not _ordered_states:
+                    st.info("No bugs found for this team.")
+                else:
+                    # ── Kanban header row ────────────────────────────────────
+                    _cols = st.columns(len(_ordered_states))
+                    for i, state in enumerate(_ordered_states):
+                        count = len(_by_state.get(state, []))
+                        color = _SC_STATE_COLORS.get(state, "#636b75")
+                        _cols[i].markdown(
+                            f'<div style="border-bottom:3px solid {color};padding-bottom:6px;margin-bottom:12px;">'
+                            f'<span style="color:{color};font-weight:700;font-size:14px;">{state}</span>'
+                            f'<span style="color:#636b75;font-size:13px;margin-left:8px;">{count}</span>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                    # ── Kanban cards ─────────────────────────────────────────
+                    _card_cols = st.columns(len(_ordered_states))
+                    for i, state in enumerate(_ordered_states):
+                        with _card_cols[i]:
+                            state_stories = _by_state.get(state, [])
+                            # Sort by priority (P1 first), then name
+                            state_stories.sort(key=lambda s: (s.get("priority") or 99, s.get("name", "")))
+                            html_cards = "".join(_sc_kanban_card(s, "") for s in state_stories)
+                            st.markdown(
+                                f'<div style="max-height:70vh;overflow-y:auto;padding-right:4px;">'
+                                f'{html_cards}</div>',
+                                unsafe_allow_html=True,
+                            )
+
+        with tab_adm_sheet:
+            st.subheader("Live Google Sheet")
+            st.markdown("Edit the ticket data directly in the embedded Google Sheet below. Changes are saved automatically to the sheet.")
+
+            st.components.v1.iframe(
+                GOOGLE_SHEET_EMBED_URL,
+                height=800,
+                scrolling=True,
+            )
+
+            st.markdown(f"[Open in Google Sheets](https://docs.google.com/spreadsheets/d/{GOOGLE_SHEET_ID}/edit?gid=0)")
