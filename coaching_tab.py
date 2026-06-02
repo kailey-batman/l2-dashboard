@@ -451,33 +451,31 @@ def _render_team_rollups(weekly_df: pd.DataFrame):
 
     st.divider()
 
-    st.markdown("**CSAT trend over time**")
+    st.markdown("**CSAT by rep by week**")
     trend = valid.dropna(subset=["CSAT"]).copy()
     if trend.empty:
         st.caption("No CSAT data yet.")
     else:
-        # Auto-zoom the y-axis so 80-100 variation is visible instead of compressing to the top
-        y_min = max(0, float(trend["CSAT"].min()) - 5)
-        y_max = min(105, float(trend["CSAT"].max()) + 5)
-        if y_max - y_min < 20:
-            y_min = max(0, y_max - 25)
-        fig2 = go.Figure()
-        for rep in sorted(trend["Rep"].unique()):
-            sub = trend[trend["Rep"] == rep].sort_values("_week_dt")
-            fig2.add_trace(go.Scatter(
-                x=sub["_week_dt"], y=sub["CSAT"], mode="lines+markers", name=rep,
-            ))
-        fig2.update_layout(
-            height=360,
-            margin=dict(l=10, r=10, t=20, b=10),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            plot_bgcolor="#373E47",
-            paper_bgcolor="#2D333B",
-            font=dict(color="#E0E0E0"),
-            xaxis=dict(title="Week of", gridcolor="#4A5160"),
-            yaxis=dict(title="CSAT %", gridcolor="#4A5160", range=[y_min, y_max]),
+        # Pivot: rows = rep, columns = week_label, values = CSAT
+        trend["_week_label"] = trend["_week_dt"].dt.strftime("%b %-d")
+        # Preserve chronological column order
+        week_order = (
+            trend[["_week_dt", "_week_label"]]
+            .drop_duplicates()
+            .sort_values("_week_dt")["_week_label"]
+            .tolist()
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        pivot = trend.pivot_table(
+            index="Rep", columns="_week_label", values="CSAT", aggfunc="mean"
+        )
+        pivot = pivot[week_order]
+        # Format as "92%" strings, "—" for missing weeks
+        display = pivot.copy().astype(object)
+        for col in display.columns:
+            for idx in display.index:
+                v = pivot.at[idx, col]
+                display.at[idx, col] = "—" if pd.isna(v) else f"{int(round(v))}%"
+        st.dataframe(display, use_container_width=True)
         st.caption("_CSAT % = share of rated conversations that scored 4 or 5._")
 
 
