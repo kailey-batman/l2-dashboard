@@ -1424,85 +1424,60 @@ section[data-testid="stSidebar"] > div:first-child {
 [data-testid="collapsedControl"],
 button[kind="header"] { display: none !important; }
 
-/* Nav buttons */
-section[data-testid="stSidebar"] .stButton > button {
-    background: transparent !important;
-    border: none !important;
-    color: #64748b !important;
-    text-align: left !important;
-    width: 100% !important;
-    padding: 10px 14px !important;
+/* ── Radio-based nav items ── */
+/* Hide the radio circle dots */
+section[data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] p { display: none; }
+section[data-testid="stSidebar"] .stRadio > div { gap: 2px !important; }
+section[data-testid="stSidebar"] .stRadio label {
+    display: flex !important;
+    align-items: center !important;
+    padding: 9px 14px !important;
     border-radius: 8px !important;
+    cursor: pointer !important;
+    color: #94a3b8 !important;
     font-size: 14px !important;
     font-weight: 500 !important;
     transition: background 0.15s, color 0.15s !important;
-    margin-bottom: 2px !important;
-    box-shadow: none !important;
+    width: 100% !important;
 }
-section[data-testid="stSidebar"] .stButton > button:hover {
+section[data-testid="stSidebar"] .stRadio label:hover {
     background: #1e293b !important;
     color: #e2e8f0 !important;
 }
-/* Active page button */
-section[data-testid="stSidebar"] .stButton > button[kind="primary"],
-section[data-testid="stSidebar"] .stButton > button[data-active="true"] {
+/* Hide the actual radio input circle */
+section[data-testid="stSidebar"] .stRadio label > div:first-child {
+    display: none !important;
+}
+/* Active (checked) item */
+section[data-testid="stSidebar"] .stRadio label[data-checked="true"],
+section[data-testid="stSidebar"] .stRadio input:checked + div {
     background: #1e293b !important;
     color: #00E676 !important;
     font-weight: 600 !important;
 }
-/* Divider */
-section[data-testid="stSidebar"] hr {
-    border-color: rgba(255,255,255,0.06) !important;
-    margin: 8px 0 !important;
-}
-/* Section labels */
-.sidebar-section-label {
-    font-size: 10px !important;
-    font-weight: 600 !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.08em !important;
-    color: #475569 !important;
-    padding: 10px 14px 4px !important;
-}
-/* Push main content right to clear sidebar */
-.main > div { margin-left: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
 with st.sidebar:
-    # Logo / title area
     st.markdown(
         '<div style="padding:16px 14px 12px;border-bottom:1px solid rgba(255,255,255,0.06);'
-        'font-size:15px;font-weight:700;color:#e2e8f0;letter-spacing:-0.02em;">L2 Dashboard</div>',
+        'font-size:15px;font-weight:700;color:#e2e8f0;letter-spacing:-0.02em;margin-bottom:8px;">L2 Dashboard</div>',
         unsafe_allow_html=True,
     )
 
-    def _nav_btn(icon, label):
-        is_active = st.session_state._active_page == label
-        if st.button(
-            f"{icon}  {label}",
-            key=f"_nav_{label}",
-            type="primary" if is_active else "secondary",
-            use_container_width=True,
-        ):
-            st.session_state._active_page = label
-            st.rerun()
+    _icon_map = {label: icon for icon, label in _all_nav}
 
-    st.markdown('<div style="padding-top:8px;"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="sidebar-section-label">Main</div>', unsafe_allow_html=True)
-    for _icon, _label in _NAV_ALWAYS:
-        _nav_btn(_icon, _label)
-
-    if _coaching_mode:
-        st.markdown('<div class="sidebar-section-label">Coaching</div>', unsafe_allow_html=True)
-        for _icon, _label in _NAV_COACHING:
-            _nav_btn(_icon, _label)
-
-    if _admin_mode:
-        st.divider()
-        st.markdown('<div class="sidebar-section-label">Admin</div>', unsafe_allow_html=True)
-        for _icon, _label in _NAV_ADMIN:
-            _nav_btn(_icon, _label)
+    _selected = st.radio(
+        "nav",
+        [label for _, label in _all_nav],
+        format_func=lambda x: f"{_icon_map[x]}  {x}",
+        index=_valid_pages.index(st.session_state._active_page) if st.session_state._active_page in _valid_pages else 0,
+        label_visibility="collapsed",
+        key="_nav_radio",
+    )
+    if _selected != st.session_state._active_page:
+        st.session_state._active_page = _selected
+        st.rerun()
 
 _page = st.session_state._active_page
 
