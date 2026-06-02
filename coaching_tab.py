@@ -315,8 +315,12 @@ def _render_date_filter(weekly_df):
     ]
 
     st.markdown("**Filter date range**")
-    preset_cols = st.columns(len(presets))
-    for col, (label, fn) in zip(preset_cols, presets):
+    # Render ALL preset buttons (including "All time") BEFORE the date_input widgets,
+    # so click handlers can safely mutate session_state without Streamlit raising
+    # "cannot be modified after the widget is instantiated".
+    presets_with_all = presets + [("All time", lambda: (data_min, data_max))]
+    preset_cols = st.columns(len(presets_with_all))
+    for col, (label, fn) in zip(preset_cols, presets_with_all):
         with col:
             key = "preset_" + label.replace(" ", "_").lower()
             if st.button(label, key=key, use_container_width=True):
@@ -337,7 +341,7 @@ def _render_date_filter(weekly_df):
     if st.session_state["coaching_end"] > data_max:
         st.session_state["coaching_end"] = data_max
 
-    c1, c2, c3 = st.columns([1, 1, 1])
+    c1, c2 = st.columns(2)
     with c1:
         start = st.date_input(
             "Start", min_value=data_min, max_value=data_max, key="coaching_start"
@@ -346,12 +350,6 @@ def _render_date_filter(weekly_df):
         end = st.date_input(
             "End", min_value=data_min, max_value=data_max, key="coaching_end"
         )
-    with c3:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("All time", key="preset_all_time", use_container_width=True):
-            st.session_state["coaching_start"] = data_min
-            st.session_state["coaching_end"] = data_max
-            st.rerun()
 
     mask = (
         (df["_week_dt"].dt.date >= start) & (df["_week_dt"].dt.date <= end)
