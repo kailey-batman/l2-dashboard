@@ -1420,9 +1420,12 @@ _coaching_mode = _is_coaching_lead()
 
 # ── Query-param routing (like epdfeedback) ───────────────────────────────────
 _active_tab = st.query_params.get("tab", "results")
-_valid_tabs = {"results", "trends", "manager", "reps"}
+# Public tabs: available to all authenticated users
+_valid_tabs = {"results", "trends"}
+# Manager tabs: coaching leads only
 if _coaching_mode:
-    _valid_tabs.add("coaching")
+    _valid_tabs.update({"manager", "reps", "coaching"})
+# Admin tab: admins only
 if _admin_mode:
     _valid_tabs.add("admin")
 if _active_tab not in _valid_tabs:
@@ -1432,8 +1435,41 @@ def _nav_cls(tab_id: str) -> str:
     return "cst-item active" if _active_tab == tab_id else "cst-item"
 
 # ── Fixed vertical sidebar (same pattern as epdfeedback.com) ─────────────────
-_coaching_link = f'<a href="?tab=coaching" class="{_nav_cls("coaching")}" title="Coaching"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg></a>' if _coaching_mode else ""
-_admin_link    = f'<a href="?tab=admin" class="{_nav_cls("admin")}" title="Admin"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></a>' if _admin_mode else ""
+# Manager section — only rendered for coaching leads
+_manager_links = f"""
+    <div class="cst-sep"></div>
+    <a href="?tab=manager" target="_self" class="{_nav_cls('manager')}" title="L2 Manager">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+        <circle cx="9" cy="7" r="4"/>
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+      </svg>
+    </a>
+    <a href="?tab=reps" target="_self" class="{_nav_cls('reps')}" title="L2 Reps">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <circle cx="12" cy="12" r="6"/>
+        <circle cx="12" cy="12" r="2"/>
+      </svg>
+    </a>
+    <a href="?tab=coaching" target="_self" class="{_nav_cls('coaching')}" title="Coaching">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+        <path d="M6 12v5c3 3 9 3 12 0v-5"/>
+      </svg>
+    </a>
+""" if _coaching_mode else ""
+
+_admin_link = f"""
+    <div class="cst-sep"></div>
+    <a href="?tab=admin" target="_self" class="{_nav_cls('admin')}" title="Admin">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+    </a>
+""" if _admin_mode else ""
 
 st.markdown(f"""
 <div class="cst-sidebar">
@@ -1443,36 +1479,19 @@ st.markdown(f"""
     </svg>
   </div>
   <nav class="cst-nav">
-    <a href="?tab=results" class="{_nav_cls('results')}" title="Results">
+    <a href="?tab=results" target="_self" class="{_nav_cls('results')}" title="Results">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/>
         <line x1="6" y1="20" x2="6" y2="14"/>
       </svg>
     </a>
-    <a href="?tab=trends" class="{_nav_cls('trends')}" title="Trends">
+    <a href="?tab=trends" target="_self" class="{_nav_cls('trends')}" title="Trends">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
         <polyline points="17 6 23 6 23 12"/>
       </svg>
     </a>
-    <div class="cst-sep"></div>
-    <a href="?tab=manager" class="{_nav_cls('manager')}" title="L2 Manager">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-        <circle cx="9" cy="7" r="4"/>
-        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-      </svg>
-    </a>
-    <a href="?tab=reps" class="{_nav_cls('reps')}" title="L2 Reps">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10"/>
-        <circle cx="12" cy="12" r="6"/>
-        <circle cx="12" cy="12" r="2"/>
-      </svg>
-    </a>
-    <div class="cst-sep"></div>
-    {_coaching_link}
+    {_manager_links}
     {_admin_link}
   </nav>
 </div>
@@ -2620,17 +2639,17 @@ def _prepare_l2_coaching_df():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PAGE — L2 MANAGER
+# PAGE — L2 MANAGER (manager section — coaching leads only)
 # ═══════════════════════════════════════════════════════════════════════════
-if _active_tab == "manager":
+if _coaching_mode and _active_tab == "manager":
     _coaching_df = _prepare_l2_coaching_df()
     l2_coaching_tab.render_manager(_coaching_df)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PAGE — L2 REPS
+# PAGE — L2 REPS (manager section — coaching leads only)
 # ═══════════════════════════════════════════════════════════════════════════
-if _active_tab == "reps":
+if _coaching_mode and _active_tab == "reps":
     _coaching_df = _prepare_l2_coaching_df()
     l2_coaching_tab.render_rep(_coaching_df)
 
