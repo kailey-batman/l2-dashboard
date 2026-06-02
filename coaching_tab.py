@@ -119,7 +119,25 @@ def _rich_text_to_md(rich_text_list):
     return "".join(out)
 
 
-def _blocks_to_markdown(blocks):
+def _table_block_to_md(client, block_id, has_column_header=True):
+    """Fetch a table block's children (table_row blocks) and render as a markdown table."""
+    try:
+        rows = client.blocks.children.list(block_id=block_id).get("results", [])
+    except Exception:
+        return ""
+    lines = []
+    for i, r in enumerate(rows):
+        cells = r.get("table_row", {}).get("cells", []) or []
+        rendered = [_rich_text_to_md(c) or "" for c in cells]
+        # Escape pipes so markdown table syntax stays valid
+        rendered = [c.replace("|", "\\|").replace("\n", " ") for c in rendered]
+        lines.append("| " + " | ".join(rendered) + " |")
+        if i == 0 and has_column_header:
+            lines.append("|" + "|".join(["---"] * len(rendered)) + "|")
+    return "\n".join(lines)
+
+
+def _blocks_to_markdown(blocks, client=None):
     """Convert a list of Notion block objects to a single markdown string."""
     lines = []
     for block in blocks:
@@ -151,7 +169,15 @@ def _blocks_to_markdown(blocks):
         elif btype == "callout":
             icon = (b.get("icon") or {}).get("emoji", "💡")
             lines.append(f"> {icon} {text}")
-        # skip child_database, child_page, table, image (not needed for coaching content)
+        elif btype == "table" and client is not None:
+            md = _table_block_to_md(
+                client,
+                block.get("id"),
+                has_column_header=b.get("has_column_header", True),
+            )
+            if md:
+                lines.append(md)
+        # skip child_database, child_page, image (not needed for coaching content)
     return "\n\n".join(lines)
 
 
@@ -169,7 +195,7 @@ def fetch_page_body(page_id):
         blocks = client.blocks.children.list(block_id=page_id).get("results", [])
     except Exception as e:
         return f"_(failed to fetch page content: {e})_"
-    return _blocks_to_markdown(blocks)
+    return _blocks_to_markdown(blocks, client=client)
 
 
 # ── Data fetchers (Notion → DataFrame) ───────────────────────────────────────
