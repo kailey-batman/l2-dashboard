@@ -522,8 +522,13 @@ def _render_rep_trend_chart(rep_weeks: pd.DataFrame, rep_name: str):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_per_rep_tabs(roster_rows, weekly_df: pd.DataFrame):
-    """Tabs: 'All' (team rollups) + one tab per rep."""
+def _render_per_rep_tabs(roster_rows, filtered_df: pd.DataFrame, full_df: pd.DataFrame):
+    """Tabs: 'All' (team rollups, date-filtered) + one tab per rep.
+
+    Each rep tab shows tiles + trend chart on filtered data, then the full
+    weekly reports list (all weeks, ignoring the date filter), with the
+    long-form profile tucked into a collapsed expander at the bottom.
+    """
     st.subheader("Per-rep coaching detail")
     if not roster_rows:
         st.info("No reps in the roster.")
@@ -538,17 +543,24 @@ def _render_per_rep_tabs(roster_rows, weekly_df: pd.DataFrame):
         st.info("No reps to display.")
         return
 
-    if "_week_dt" not in weekly_df.columns and not weekly_df.empty:
-        weekly_df = weekly_df.copy()
-        weekly_df["_week_dt"] = pd.to_datetime(weekly_df["Week of"], errors="coerce")
+    def _ensure_dt(df):
+        if df.empty:
+            return df
+        if "_week_dt" not in df.columns:
+            df = df.copy()
+            df["_week_dt"] = pd.to_datetime(df["Week of"], errors="coerce")
+        return df
+
+    filtered_df = _ensure_dt(filtered_df)
+    full_df = _ensure_dt(full_df)
 
     # "All" tab first, then one tab per rep
     tab_labels = ["All"] + rep_names
     sub_tabs = st.tabs(tab_labels)
 
-    # "All" tab — team rollups
+    # "All" tab — team rollups (uses filtered window)
     with sub_tabs[0]:
-        _render_team_rollups(weekly_df)
+        _render_team_rollups(filtered_df)
 
     # Per-rep tabs
     for tab, name in zip(sub_tabs[1:], rep_names):
@@ -571,14 +583,20 @@ def _render_per_rep_tabs(roster_rows, weekly_df: pd.DataFrame):
                 if page_url:
                     st.link_button("Open in Notion", page_url, use_container_width=True)
 
-            # Filter weekly to this rep + sort newest first
-            if not weekly_df.empty:
-                rep_weeks = weekly_df[weekly_df["Rep"] == name].copy()
+            # Filtered weeks (tiles + trend chart) vs full history (weekly list)
+            if not filtered_df.empty:
+                rep_weeks = filtered_df[filtered_df["Rep"] == name].copy()
                 rep_weeks = rep_weeks.dropna(subset=["_week_dt"]).sort_values("_week_dt", ascending=False)
             else:
                 rep_weeks = pd.DataFrame()
 
-            # Latest week metric tiles
+            if not full_df.empty:
+                rep_weeks_all = full_df[full_df["Rep"] == name].copy()
+                rep_weeks_all = rep_weeks_all.dropna(subset=["_week_dt"]).sort_values("_week_dt", ascending=False)
+            else:
+                rep_weeks_all = pd.DataFrame()
+
+            # Latest week metric tiles (from filtered)
             if not rep_weeks.empty:
                 latest = rep_weeks.iloc[0]
                 m_cols = st.columns(5)
@@ -603,30 +621,19 @@ def _render_per_rep_tabs(roster_rows, weekly_df: pd.DataFrame):
                 )
                 m_cols[4].metric("Tickets", _fmt_int(latest.get("Shortcut tickets filed")))
 
-            # Per-rep trend chart
+            # Per-rep trend chart (filtered window)
             if not rep_weeks.empty:
                 st.markdown("")
                 _render_rep_trend_chart(rep_weeks, name)
 
             st.divider()
 
-            # Profile body (from rep's roster page)
-            st.markdown("#### Profile")
-            with st.spinner("Loading profile from Notion..."):
-                profile_md = fetch_page_body(rep.get("Page ID", ""))
-            if profile_md and profile_md.strip():
-                st.markdown(profile_md)
-            else:
-                st.caption("_No profile written yet._")
-
-            st.divider()
-
-            # Weekly reports — each as expander, with full body
+            # Weekly reports — each as expander, with full body (ALL weeks, not date-filtered)
             st.markdown("#### Weekly reports")
-            if rep_weeks.empty:
-                st.caption("_No weekly reports for this rep in the selected date range._")
+            if rep_weeks_all.empty:
+                st.caption("_No weekly reports for this rep yet._")
             else:
-                for _, week_row in rep_weeks.iterrows():
+                for _, week_row in rep_weeks_all.iterrows():
                     week_label = week_row.get("Report") or f"Week of {week_row['_week_dt'].date()}"
                     overall = week_row.get("Overall") or "n/a"
                     with st.expander(f"{week_label} · Overall: {overall}", expanded=False):
@@ -680,6 +687,16 @@ def _render_per_rep_tabs(roster_rows, weekly_df: pd.DataFrame):
                         if weekly_body and weekly_body.strip():
                             st.markdown(weekly_body)
 
+            # Profile (tucked at the bottom, collapsed by default)
+            st.divider()
+            with st.expander("Profile (writing style, strengths, areas for growth)", expanded=False):
+                with st.spinner("Loading profile from Notion..."):
+                    profile_md = fetch_page_body(rep.get("Page ID", ""))
+                if profile_md and profile_md.strip():
+                    st.markdown(profile_md)
+                else:
+                    st.caption("_No profile written yet._")
+
 
 def _render_coaching_roster_link():
     st.subheader("Coaching roster")
@@ -710,6 +727,6 @@ def render():
         filtered_df = weekly_df
 
     st.divider()
-    _render_per_rep_tabs(roster_rows, filtered_df)
+    _render_per_rep_tabs(roster_rows, filtered_df, weekly_df)
     st.divider()
     _render_coaching_roster_link()
