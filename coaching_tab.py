@@ -475,8 +475,42 @@ def _render_team_rollups(weekly_df: pd.DataFrame):
         st.plotly_chart(fig2, use_container_width=True)
 
 
+def _render_rep_trend_chart(rep_weeks: pd.DataFrame, rep_name: str):
+    """Per-rep line chart: CSAT % and Conversations reviewed over time, dual axis."""
+    if rep_weeks.empty:
+        return
+    df = rep_weeks.dropna(subset=["_week_dt"]).sort_values("_week_dt")
+    if df.empty:
+        return
+
+    convs = df["Conversations reviewed"].fillna(df.get("New conversations"))
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df["_week_dt"], y=df["CSAT"], mode="lines+markers", name="CSAT %",
+        line=dict(color="#00E676", width=2), yaxis="y2",
+    ))
+    fig.add_trace(go.Bar(
+        x=df["_week_dt"], y=convs, name="Conversations",
+        marker_color="#42A5F5", opacity=0.55,
+    ))
+    fig.update_layout(
+        height=280,
+        margin=dict(l=10, r=10, t=20, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        plot_bgcolor="#373E47",
+        paper_bgcolor="#2D333B",
+        font=dict(color="#E0E0E0"),
+        xaxis=dict(title="Week of", gridcolor="#4A5160"),
+        yaxis=dict(title="Conversations", gridcolor="#4A5160"),
+        yaxis2=dict(title="CSAT %", overlaying="y", side="right",
+                    range=[0, 105], gridcolor="#4A5160", showgrid=False),
+        title=dict(text=f"{rep_name} — CSAT and volume over time", x=0, font=dict(size=14)),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def _render_per_rep_tabs(roster_rows, weekly_df: pd.DataFrame):
-    """One sub-tab per rep, each showing full Notion notes (profile + weekly bodies)."""
+    """Tabs: 'All' (team rollups) + one tab per rep."""
     st.subheader("Per-rep coaching detail")
     if not roster_rows:
         st.info("No reps in the roster.")
@@ -495,9 +529,16 @@ def _render_per_rep_tabs(roster_rows, weekly_df: pd.DataFrame):
         weekly_df = weekly_df.copy()
         weekly_df["_week_dt"] = pd.to_datetime(weekly_df["Week of"], errors="coerce")
 
-    sub_tabs = st.tabs(rep_names)
+    # "All" tab first, then one tab per rep
+    tab_labels = ["All"] + rep_names
+    sub_tabs = st.tabs(tab_labels)
 
-    for tab, name in zip(sub_tabs, rep_names):
+    # "All" tab — team rollups
+    with sub_tabs[0]:
+        _render_team_rollups(weekly_df)
+
+    # Per-rep tabs
+    for tab, name in zip(sub_tabs[1:], rep_names):
         with tab:
             rep = rep_lookup[name]
             full_name = rep.get("Full name") or name
@@ -548,6 +589,11 @@ def _render_per_rep_tabs(roster_rows, weekly_df: pd.DataFrame):
                     f"{int(latest.get('CSAT'))}%" if pd.notna(latest.get("CSAT")) else "n/a",
                 )
                 m_cols[4].metric("Tickets", _fmt_int(latest.get("Shortcut tickets filed")))
+
+            # Per-rep trend chart
+            if not rep_weeks.empty:
+                st.markdown("")
+                _render_rep_trend_chart(rep_weeks, name)
 
             st.divider()
 
@@ -650,8 +696,6 @@ def render():
     if filtered_df is None:
         filtered_df = weekly_df
 
-    st.divider()
-    _render_team_rollups(filtered_df)
     st.divider()
     _render_per_rep_tabs(roster_rows, filtered_df)
     st.divider()
