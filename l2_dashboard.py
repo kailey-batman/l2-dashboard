@@ -1416,10 +1416,10 @@ _coaching_mode = _is_coaching_lead()
 # ── Query-param routing (like epdfeedback) ───────────────────────────────────
 _active_tab = st.query_params.get("tab", "results")
 # Public tabs: available to all authenticated users
-_valid_tabs = {"results", "trends"}
+_valid_tabs = {"results", "trends", "reps"}
 # Manager tabs: coaching leads only
 if _coaching_mode:
-    _valid_tabs.update({"manager", "reps", "coaching"})
+    _valid_tabs.update({"manager", "coaching"})
 # Admin tab: admins only
 if _admin_mode:
     _valid_tabs.add("admin")
@@ -1440,22 +1440,14 @@ _manager_links = f"""
         <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
         <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
       </svg>
-      L2 Manager
-    </a>
-    <a href="?tab=reps" target="_self" class="{_nav_cls('reps')}">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10"/>
-        <circle cx="12" cy="12" r="6"/>
-        <circle cx="12" cy="12" r="2"/>
-      </svg>
-      L2 Reps
+      L2 Coaching
     </a>
     <a href="?tab=coaching" target="_self" class="{_nav_cls('coaching')}">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
         <path d="M6 12v5c3 3 9 3 12 0v-5"/>
       </svg>
-      Coaching
+      L1 Coaching
     </a>
 """ if _coaching_mode else ""
 
@@ -1492,6 +1484,14 @@ st.markdown(f"""
         <polyline points="17 6 23 6 23 12"/>
       </svg>
       Trends
+    </a>
+    <a href="?tab=reps" target="_self" class="{_nav_cls('reps')}">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <circle cx="12" cy="12" r="6"/>
+        <circle cx="12" cy="12" r="2"/>
+      </svg>
+      L2 Reps
     </a>
     {_manager_links}
     {_admin_link}
@@ -2641,7 +2641,7 @@ def _prepare_l2_coaching_df():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PAGE — L2 MANAGER (manager section — coaching leads only)
+# PAGE — L2 COACHING (manager section — coaching leads only)
 # ═══════════════════════════════════════════════════════════════════════════
 if _coaching_mode and _active_tab == "manager":
     _coaching_df = _prepare_l2_coaching_df()
@@ -2649,9 +2649,9 @@ if _coaching_mode and _active_tab == "manager":
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PAGE — L2 REPS (manager section — coaching leads only)
+# PAGE — L2 REPS (public)
 # ═══════════════════════════════════════════════════════════════════════════
-if _coaching_mode and _active_tab == "reps":
+if _active_tab == "reps":
     _coaching_df = _prepare_l2_coaching_df()
     l2_coaching_tab.render_rep(_coaching_df)
 
