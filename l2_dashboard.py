@@ -1087,7 +1087,7 @@ def _load_activity_log():
 
 
 # ── Page Config ─────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Escalation Tracker", page_icon="logo.svg", layout="wide")
+st.set_page_config(page_title="Escalation Tracker", page_icon="logo.svg", layout="wide", initial_sidebar_state="expanded")
 
 # ── Restore session from cookie ──────────────────────────────────────────────
 if not st.session_state.get("_auth_user"):
