@@ -1,17 +1,15 @@
 """
 Coaching tab for the L2 dashboard.
 Pulls weekly coaching reports from Notion and renders team-level rollups,
-per-rep at-a-glance, and a link to the full Notion roster.
+per-rep tabs with full Notion notes, and a link to the full Notion roster.
 
 Permissions are gated upstream: only emails in DASHBOARD_COACHING_EMAILS see this tab.
 
 Required env vars:
 - NOTION_TOKEN: Notion integration token (workspace must have integration added)
-- (Optional) NOTION_ROSTER_DB_URL: overrides the default roster URL shown in the link section
 """
 
 import os
-import time
 from datetime import datetime, timedelta
 
 import streamlit as st
@@ -99,6 +97,82 @@ def _query_data_source(client, ds_id):
         return client.databases.query(database_id=ds_id).get("results", [])
 
 
+# ── Rich text + block → markdown converters ─────────────────────────────────
+def _rich_text_to_md(rich_text_list):
+    """Convert a Notion rich_text array to a markdown string."""
+    out = []
+    for rt in rich_text_list or []:
+        text = rt.get("plain_text", "")
+        if not text:
+            continue
+        ann = rt.get("annotations") or {}
+        href = rt.get("href")
+        if ann.get("code"):
+            text = f"`{text}`"
+        if ann.get("bold"):
+            text = f"**{text}**"
+        if ann.get("italic"):
+            text = f"*{text}*"
+        if href:
+            text = f"[{text}]({href})"
+        out.append(text)
+    return "".join(out)
+
+
+def _blocks_to_markdown(blocks):
+    """Convert a list of Notion block objects to a single markdown string."""
+    lines = []
+    for block in blocks:
+        btype = block.get("type")
+        if not btype:
+            continue
+        b = block.get(btype, {})
+        rt = b.get("rich_text", [])
+        text = _rich_text_to_md(rt)
+        if btype == "paragraph":
+            lines.append(text or "")
+        elif btype == "heading_1":
+            lines.append(f"# {text}")
+        elif btype == "heading_2":
+            lines.append(f"## {text}")
+        elif btype == "heading_3":
+            lines.append(f"### {text}")
+        elif btype == "bulleted_list_item":
+            lines.append(f"- {text}")
+        elif btype == "numbered_list_item":
+            lines.append(f"1. {text}")
+        elif btype == "quote":
+            lines.append(f"> {text}")
+        elif btype == "code":
+            lang = b.get("language", "")
+            lines.append(f"```{lang}\n{text}\n```")
+        elif btype == "divider":
+            lines.append("---")
+        elif btype == "callout":
+            icon = (b.get("icon") or {}).get("emoji", "💡")
+            lines.append(f"> {icon} {text}")
+        # skip child_database, child_page, table, image (not needed for coaching content)
+    return "\n\n".join(lines)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_page_body(page_id):
+    """Fetch a Notion page's child blocks and return as a markdown string. Cached 5 min."""
+    if not page_id:
+        return ""
+    token = os.environ.get("NOTION_TOKEN")
+    if not token:
+        return ""
+    try:
+        from notion_client import Client
+        client = Client(auth=token)
+        blocks = client.blocks.children.list(block_id=page_id).get("results", [])
+    except Exception as e:
+        return f"_(failed to fetch page content: {e})_"
+    return _blocks_to_markdown(blocks)
+
+
+# ── Data fetchers (Notion → DataFrame) ───────────────────────────────────────
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_roster_rows():
     """Return list of dicts, one per rep, from the roster DB."""
@@ -162,6 +236,7 @@ def fetch_weekly_history():
                 "Top opportunity": _prop(props, "Top opportunity", default=""),
                 "Status": _prop(props, "Status"),
                 "Page URL": page.get("url", ""),
+                "Page ID": page.get("id", ""),
             })
     return all_rows
 
@@ -178,40 +253,71 @@ def _render_no_token_warning():
     )
 
 
+def _render_date_filter(weekly_df):
+    """Returns (start_date, end_date, filtered_df). filtered_df has _week_dt column."""
+    if weekly_df.empty:
+        return None, None, weekly_df
+    df = weekly_df.copy()
+    df["_week_dt"] = pd.to_datetime(df["Week of"], errors="coerce")
+    valid_dates = df["_week_dt"].dropna()
+    if valid_dates.empty:
+        return None, None, df
+    min_d = valid_dates.min().date()
+    max_d = valid_dates.max().date()
+
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c1:
+        start = st.date_input(
+            "Start week", value=min_d, min_value=min_d, max_value=max_d, key="coaching_start"
+        )
+    with c2:
+        end = st.date_input(
+            "End week", value=max_d, min_value=min_d, max_value=max_d, key="coaching_end"
+        )
+    with c3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Reset dates", key="coaching_reset"):
+            st.session_state.coaching_start = min_d
+            st.session_state.coaching_end = max_d
+            st.rerun()
+
+    mask = (
+        (df["_week_dt"].dt.date >= start) & (df["_week_dt"].dt.date <= end)
+    ) | df["_week_dt"].isna()
+    return start, end, df[mask].copy()
+
+
 def _render_team_rollups(weekly_df: pd.DataFrame):
     st.subheader("Team rollups")
     if weekly_df.empty:
-        st.info("No weekly reports yet.")
+        st.info("No weekly reports in the selected date range.")
         return
 
-    # Filter to most recent week per rep (Latest week)
-    weekly_df = weekly_df.copy()
-    weekly_df["_week_dt"] = pd.to_datetime(weekly_df["Week of"], errors="coerce")
+    if "_week_dt" not in weekly_df.columns:
+        weekly_df = weekly_df.copy()
+        weekly_df["_week_dt"] = pd.to_datetime(weekly_df["Week of"], errors="coerce")
     valid = weekly_df.dropna(subset=["_week_dt"])
     if valid.empty:
-        st.info("No dated weekly reports yet.")
+        st.info("No dated weekly reports in the selected date range.")
         return
 
     latest_per_rep = valid.sort_values("_week_dt").groupby("Rep").tail(1)
 
-    # Top metric tiles for latest week across team
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        n_reps = len(latest_per_rep)
-        st.metric("Reps reviewed this cycle", n_reps)
+        st.metric("Reps in range", len(latest_per_rep))
     with col2:
         avg_csat = latest_per_rep["CSAT"].dropna().mean()
         st.metric("Avg latest CSAT", f"{avg_csat:.0f}%" if pd.notna(avg_csat) else "n/a")
     with col3:
         total_tickets = latest_per_rep["Shortcut tickets filed"].fillna(0).sum()
-        st.metric("Tickets filed (latest week)", int(total_tickets))
+        st.metric("Tickets (latest)", int(total_tickets))
     with col4:
         total_replies = latest_per_rep["Replies sent"].fillna(0).sum()
-        st.metric("Replies sent (latest week)", int(total_replies))
+        st.metric("Replies (latest)", int(total_replies))
 
     st.divider()
 
-    # Dimension distribution (stacked bar across reps for each dimension)
     st.markdown("**Latest week rating distribution by dimension**")
     dim_counts = {dim: latest_per_rep[dim].value_counts() for dim in DIMENSIONS}
     bar_data = []
@@ -249,10 +355,8 @@ def _render_team_rollups(weekly_df: pd.DataFrame):
 
     st.divider()
 
-    # CSAT trend over time (line per rep)
     st.markdown("**CSAT trend over time**")
-    trend = valid.copy()
-    trend = trend.dropna(subset=["CSAT"])
+    trend = valid.dropna(subset=["CSAT"]).copy()
     if trend.empty:
         st.caption("No CSAT data yet.")
     else:
@@ -275,49 +379,146 @@ def _render_team_rollups(weekly_df: pd.DataFrame):
         st.plotly_chart(fig2, use_container_width=True)
 
 
-def _render_per_rep_table(roster_rows, weekly_df: pd.DataFrame):
-    st.subheader("Per-rep at-a-glance (latest week)")
+def _render_per_rep_tabs(roster_rows, weekly_df: pd.DataFrame):
+    """One sub-tab per rep, each showing full Notion notes (profile + weekly bodies)."""
+    st.subheader("Per-rep coaching detail")
     if not roster_rows:
         st.info("No reps in the roster.")
         return
 
-    # Build a row per rep with their latest week's stats
-    weekly_df = weekly_df.copy()
-    weekly_df["_week_dt"] = pd.to_datetime(weekly_df["Week of"], errors="coerce")
-    latest_by_rep = {}
-    for rep, group in weekly_df.dropna(subset=["_week_dt"]).groupby("Rep"):
-        latest_by_rep[rep] = group.sort_values("_week_dt").iloc[-1].to_dict()
+    # Sort reps alphabetically by name
+    sorted_reps = sorted(roster_rows, key=lambda r: r.get("Name", "") or "")
+    rep_names = [r.get("Name") or "Unknown" for r in sorted_reps]
+    rep_lookup = {r.get("Name") or "Unknown": r for r in sorted_reps}
 
-    rows = []
-    for r in roster_rows:
-        name = r.get("Name")
-        latest = latest_by_rep.get(name, {})
-        rows.append({
-            "Rep": name,
-            "Last reviewed": r.get("Last reviewed") or "",
-            "Latest overall": latest.get("Overall") or r.get("Latest overall") or "",
-            "Convos": latest.get("Conversations reviewed"),
-            "Tickets": latest.get("Shortcut tickets filed"),
-            "FRT (m)": latest.get("Median first response (m)"),
-            "TTC (h)": latest.get("Median time to close (h)"),
-            "CSAT %": latest.get("CSAT"),
-            "Top opportunity": (latest.get("Top opportunity") or "")[:120],
-            "Page": r.get("Page URL"),
-        })
-    df = pd.DataFrame(rows)
+    if not rep_names:
+        st.info("No reps to display.")
+        return
 
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Page": st.column_config.LinkColumn("Notion", display_text="Open"),
-            "Top opportunity": st.column_config.TextColumn("Top opportunity", width="large"),
-            "CSAT %": st.column_config.NumberColumn("CSAT %", format="%d%%"),
-            "FRT (m)": st.column_config.NumberColumn("FRT (m)", format="%.1f"),
-            "TTC (h)": st.column_config.NumberColumn("TTC (h)", format="%.1f"),
-        },
-    )
+    if "_week_dt" not in weekly_df.columns and not weekly_df.empty:
+        weekly_df = weekly_df.copy()
+        weekly_df["_week_dt"] = pd.to_datetime(weekly_df["Week of"], errors="coerce")
+
+    sub_tabs = st.tabs(rep_names)
+
+    for tab, name in zip(sub_tabs, rep_names):
+        with tab:
+            rep = rep_lookup[name]
+            full_name = rep.get("Full name") or name
+            slack = rep.get("Slack handle") or ""
+            last_reviewed = rep.get("Last reviewed") or "never"
+            latest_overall = rep.get("Latest overall") or "n/a"
+            page_url = rep.get("Page URL", "")
+
+            header_cols = st.columns([3, 1])
+            with header_cols[0]:
+                st.markdown(f"### {full_name}")
+                st.caption(
+                    f"Slack: `{slack or '—'}` · Last reviewed: {last_reviewed} · "
+                    f"Latest overall: **{latest_overall}**"
+                )
+            with header_cols[1]:
+                if page_url:
+                    st.link_button("Open in Notion", page_url, use_container_width=True)
+
+            # Filter weekly to this rep + sort newest first
+            if not weekly_df.empty:
+                rep_weeks = weekly_df[weekly_df["Rep"] == name].copy()
+                rep_weeks = rep_weeks.dropna(subset=["_week_dt"]).sort_values("_week_dt", ascending=False)
+            else:
+                rep_weeks = pd.DataFrame()
+
+            # Latest week metric tiles
+            if not rep_weeks.empty:
+                latest = rep_weeks.iloc[0]
+                m_cols = st.columns(5)
+
+                def _fmt_num(val, suffix=""):
+                    return f"{val:.1f}{suffix}" if pd.notna(val) else "n/a"
+
+                def _fmt_int(val):
+                    return int(val) if pd.notna(val) else "n/a"
+
+                m_cols[0].metric("New convos", _fmt_int(latest.get("New conversations")))
+                m_cols[1].metric("FRT", _fmt_num(latest.get("Median first response (m)"), " m"))
+                m_cols[2].metric("TTC", _fmt_num(latest.get("Median time to close (h)"), " h"))
+                m_cols[3].metric(
+                    "CSAT",
+                    f"{int(latest.get('CSAT'))}%" if pd.notna(latest.get("CSAT")) else "n/a",
+                )
+                m_cols[4].metric("Tickets", _fmt_int(latest.get("Shortcut tickets filed")))
+
+            st.divider()
+
+            # Profile body (from rep's roster page)
+            st.markdown("#### Profile")
+            with st.spinner("Loading profile from Notion..."):
+                profile_md = fetch_page_body(rep.get("Page ID", ""))
+            if profile_md and profile_md.strip():
+                st.markdown(profile_md)
+            else:
+                st.caption("_No profile written yet._")
+
+            st.divider()
+
+            # Weekly reports — each as expander, with full body
+            st.markdown("#### Weekly reports")
+            if rep_weeks.empty:
+                st.caption("_No weekly reports for this rep in the selected date range._")
+            else:
+                for _, week_row in rep_weeks.iterrows():
+                    week_label = week_row.get("Report") or f"Week of {week_row['_week_dt'].date()}"
+                    overall = week_row.get("Overall") or "n/a"
+                    with st.expander(f"{week_label} · Overall: {overall}", expanded=False):
+                        # Ratings row
+                        r_cols = st.columns(5)
+                        rating_map = [
+                            ("Writing", "Writing & tone"),
+                            ("Tech", "Technical accuracy"),
+                            ("Escalation", "Escalation judgment"),
+                            ("Troubleshooting", "Troubleshooting depth"),
+                            ("Overall", "Overall"),
+                        ]
+                        for col, (label, key) in zip(r_cols, rating_map):
+                            val = week_row.get(key) or "n/a"
+                            col.markdown(f"**{label}**\n\n{val}")
+
+                        st.markdown("")
+
+                        # Metric row (pre-computed to avoid nested f-strings)
+                        nc_val = week_row.get("New conversations")
+                        frt_val = week_row.get("Median first response (m)")
+                        ttc_val = week_row.get("Median time to close (h)")
+                        csat_val = week_row.get("CSAT")
+                        tix_val = week_row.get("Shortcut tickets filed")
+
+                        nc_str = str(int(nc_val)) if pd.notna(nc_val) else "n/a"
+                        frt_str = f"{frt_val:.1f} m" if pd.notna(frt_val) else "n/a"
+                        ttc_str = f"{ttc_val:.1f} h" if pd.notna(ttc_val) else "n/a"
+                        csat_str = f"{int(csat_val)}%" if pd.notna(csat_val) else "n/a"
+                        tix_str = str(int(tix_val)) if pd.notna(tix_val) else "n/a"
+
+                        m_cols2 = st.columns(5)
+                        m_cols2[0].caption(f"New convos: {nc_str}")
+                        m_cols2[1].caption(f"FRT: {frt_str}")
+                        m_cols2[2].caption(f"TTC: {ttc_str}")
+                        m_cols2[3].caption(f"CSAT: {csat_str}")
+                        m_cols2[4].caption(f"Tickets: {tix_str}")
+
+                        st.markdown("")
+
+                        # Top strength + opportunity
+                        if week_row.get("Top strength"):
+                            st.markdown(f"**Top strength:** {week_row['Top strength']}")
+                        if week_row.get("Top opportunity"):
+                            st.markdown(f"**Top opportunity:** {week_row['Top opportunity']}")
+
+                        st.markdown("")
+
+                        # Full TLDR body from the weekly page
+                        weekly_body = fetch_page_body(week_row.get("Page ID", ""))
+                        if weekly_body and weekly_body.strip():
+                            st.markdown(weekly_body)
 
 
 def _render_coaching_roster_link():
@@ -325,10 +526,6 @@ def _render_coaching_roster_link():
     st.markdown(
         f"Full coaching history with weekly TLDRs and per-rep profiles is in Notion: "
         f"[Open Support Team Coaching →]({ROSTER_DB_URL})"
-    )
-    st.caption(
-        "Each rep's page contains an embedded weekly history database with standout work + "
-        "coaching items + ratings. Click into a rep to drill in."
     )
 
 
@@ -347,8 +544,14 @@ def render():
 
     weekly_df = pd.DataFrame(weekly_rows) if weekly_rows else pd.DataFrame()
 
-    _render_team_rollups(weekly_df)
+    # Date filter at the top
+    start, end, filtered_df = _render_date_filter(weekly_df)
+    if filtered_df is None:
+        filtered_df = weekly_df
+
     st.divider()
-    _render_per_rep_table(roster_rows, weekly_df)
+    _render_team_rollups(filtered_df)
+    st.divider()
+    _render_per_rep_tabs(roster_rows, filtered_df)
     st.divider()
     _render_coaching_roster_link()
