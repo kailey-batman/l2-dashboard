@@ -254,7 +254,11 @@ def _render_no_token_warning():
 
 
 def _render_date_filter(weekly_df):
-    """Returns (start_date, end_date, filtered_df). filtered_df has _week_dt column."""
+    """Returns (start_date, end_date, filtered_df). filtered_df has _week_dt column.
+
+    Includes preset buttons (Last week / This month / Last 4 weeks / This quarter / Last quarter)
+    that update the session state and rerun, plus a manual date picker.
+    """
     if weekly_df.empty:
         return None, None, weekly_df
     df = weekly_df.copy()
@@ -262,23 +266,84 @@ def _render_date_filter(weekly_df):
     valid_dates = df["_week_dt"].dropna()
     if valid_dates.empty:
         return None, None, df
-    min_d = valid_dates.min().date()
-    max_d = valid_dates.max().date()
+
+    data_min = valid_dates.min().date()
+    data_max = valid_dates.max().date()
+    today = datetime.now().date()
+
+    def _clamp(s, e):
+        return max(s, data_min), min(e, data_max)
+
+    def _last_week():
+        weekday = today.weekday()  # Mon=0, Sun=6
+        this_mon = today - timedelta(days=weekday)
+        last_mon = this_mon - timedelta(days=7)
+        last_sun = this_mon - timedelta(days=1)
+        return _clamp(last_mon, last_sun)
+
+    def _this_month():
+        return _clamp(today.replace(day=1), today)
+
+    def _last_4_weeks():
+        return _clamp(today - timedelta(days=28), today)
+
+    def _this_quarter():
+        q_month = ((today.month - 1) // 3) * 3 + 1
+        return _clamp(today.replace(month=q_month, day=1), today)
+
+    def _last_quarter():
+        q_month = ((today.month - 1) // 3) * 3 + 1
+        this_q_start = today.replace(month=q_month, day=1)
+        last_q_end = this_q_start - timedelta(days=1)
+        last_q_month = ((last_q_end.month - 1) // 3) * 3 + 1
+        last_q_start = last_q_end.replace(month=last_q_month, day=1)
+        return _clamp(last_q_start, last_q_end)
+
+    presets = [
+        ("Last week", _last_week),
+        ("This month", _this_month),
+        ("Last 4 weeks", _last_4_weeks),
+        ("This quarter", _this_quarter),
+        ("Last quarter", _last_quarter),
+    ]
+
+    st.markdown("**Filter date range**")
+    preset_cols = st.columns(len(presets))
+    for col, (label, fn) in zip(preset_cols, presets):
+        with col:
+            key = "preset_" + label.replace(" ", "_").lower()
+            if st.button(label, key=key, use_container_width=True):
+                s, e = fn()
+                st.session_state["coaching_start"] = s
+                st.session_state["coaching_end"] = e
+                st.rerun()
+
+    # Initialize session state if not yet set
+    if "coaching_start" not in st.session_state:
+        st.session_state["coaching_start"] = data_min
+    if "coaching_end" not in st.session_state:
+        st.session_state["coaching_end"] = data_max
+
+    # Clamp session state to current data range (in case data shifted)
+    if st.session_state["coaching_start"] < data_min:
+        st.session_state["coaching_start"] = data_min
+    if st.session_state["coaching_end"] > data_max:
+        st.session_state["coaching_end"] = data_max
 
     c1, c2, c3 = st.columns([1, 1, 1])
     with c1:
         start = st.date_input(
-            "Start week", value=min_d, min_value=min_d, max_value=max_d, key="coaching_start"
+            "Start", min_value=data_min, max_value=data_max, key="coaching_start"
         )
     with c2:
         end = st.date_input(
-            "End week", value=max_d, min_value=min_d, max_value=max_d, key="coaching_end"
+            "End", min_value=data_min, max_value=data_max, key="coaching_end"
         )
     with c3:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Reset dates", key="coaching_reset"):
-            st.session_state.coaching_start = min_d
-            st.session_state.coaching_end = max_d
+        if st.button("All time", key="preset_all_time", use_container_width=True):
+            st.session_state["coaching_start"] = data_min
+            st.session_state["coaching_end"] = data_max
             st.rerun()
 
     mask = (
