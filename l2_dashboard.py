@@ -2672,6 +2672,84 @@ def _prepare_l2_coaching_df():
 # ═══════════════════════════════════════════════════════════════════════════
 if _coaching_mode and _active_tab == "manager":
     _coaching_df = _prepare_l2_coaching_df()
+
+    # ── Date range filter ────────────────────────────────────────────────────
+    _today_mgr = datetime.now().date()
+
+    def _quarter_start(d):
+        q_month = ((d.month - 1) // 3) * 3 + 1
+        return d.replace(month=q_month, day=1)
+
+    def _last_quarter_range(d):
+        # Last day of previous quarter = day before current quarter start
+        qs = _quarter_start(d)
+        lq_end = qs - timedelta(days=1)
+        lq_start = _quarter_start(lq_end)
+        return lq_start, lq_end
+
+    _mgr_presets = [
+        ("Last week",    _today_mgr - timedelta(days=7),  _today_mgr),
+        ("This month",   _today_mgr.replace(day=1),       _today_mgr),
+        ("Last 4 weeks", _today_mgr - timedelta(days=28), _today_mgr),
+        ("This quarter", _quarter_start(_today_mgr),      _today_mgr),
+        ("Last quarter", *_last_quarter_range(_today_mgr)),
+    ]
+
+    # Fallback min date from data
+    _mgr_data_min = (
+        _coaching_df["_parsed_date"].min().date()
+        if not _coaching_df.empty and "_parsed_date" in _coaching_df.columns
+           and _coaching_df["_parsed_date"].notna().any()
+        else _today_mgr - timedelta(days=365)
+    )
+
+    # Initialize session state
+    if "mgr_start" not in st.session_state:
+        st.session_state["mgr_start"] = _mgr_data_min
+    if "mgr_end" not in st.session_state:
+        st.session_state["mgr_end"] = _today_mgr
+
+    # Quick-select preset buttons
+    _preset_cols = st.columns(len(_mgr_presets))
+    for _pi, (_plabel, _ps, _pe) in enumerate(_mgr_presets):
+        if _preset_cols[_pi].button(_plabel, key=f"mgr_preset_{_pi}", use_container_width=True):
+            st.session_state["mgr_start"] = _ps
+            st.session_state["mgr_end"] = _pe
+            st.rerun()
+
+    # Date pickers — clamped so widgets don't error
+    _mgr_clamp_min = min(_mgr_data_min, st.session_state["mgr_start"])
+    _mgr_clamp_max = _today_mgr
+    _dc1, _dc2 = st.columns(2)
+    with _dc1:
+        _mgr_start = st.date_input(
+            "From",
+            value=max(_mgr_clamp_min, st.session_state["mgr_start"]),
+            min_value=_mgr_clamp_min,
+            max_value=_mgr_clamp_max,
+            key="mgr_start_picker",
+        )
+    with _dc2:
+        _mgr_end = st.date_input(
+            "To",
+            value=min(_mgr_clamp_max, st.session_state["mgr_end"]),
+            min_value=_mgr_clamp_min,
+            max_value=_mgr_clamp_max,
+            key="mgr_end_picker",
+        )
+    # Sync picker values back to session state so presets + pickers stay in sync
+    st.session_state["mgr_start"] = _mgr_start
+    st.session_state["mgr_end"] = _mgr_end
+
+    # Apply date filter to coaching df
+    if not _coaching_df.empty and "_parsed_date" in _coaching_df.columns:
+        _mgr_mask = (
+            (_coaching_df["_parsed_date"].dt.date >= _mgr_start) &
+            (_coaching_df["_parsed_date"].dt.date <= _mgr_end)
+        ) | _coaching_df["_parsed_date"].isna()
+        _coaching_df = _coaching_df[_mgr_mask].copy()
+
+    st.divider()
     l2_coaching_tab.render_manager(_coaching_df)
 
 
