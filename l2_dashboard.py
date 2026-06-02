@@ -1149,7 +1149,16 @@ st.markdown("""
     [data-testid="collapsedControl"] { display: none !important; }
 
     /* Push main content right to make room for custom sidebar */
-    [data-testid="stMain"] { margin-left: 176px !important; }
+    [data-testid="stMain"] {
+        margin-left: 176px !important;
+        width: calc(100vw - 176px) !important;
+        max-width: calc(100vw - 176px) !important;
+        overflow-x: hidden !important;
+    }
+    [data-testid="stMainBlockContainer"] {
+        max-width: 100% !important;
+        overflow-x: hidden !important;
+    }
 
     /* Fixed left sidebar */
     .cst-sidebar {
@@ -1494,7 +1503,28 @@ if _admin_mode:
     )
 
 _sb.append('</nav></div>')
-st.html("".join(_sb))
+
+# ── Inject sidebar into parent document via JS so position:fixed works
+# and the CSS from st.markdown (in the parent page <head>) applies correctly.
+# st.html() renders inside an isolated iframe; JS injection appends the
+# element directly to window.parent.document.body instead.
+_sb_html = "".join(_sb).replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
+_js_inject = f"""
+<script>
+(function() {{
+    var SIDEBAR_ID = 'cst-sidebar-root';
+    // Remove any previously injected sidebar (on hot-reload / rerun)
+    var old = window.parent.document.getElementById(SIDEBAR_ID);
+    if (old) old.remove();
+
+    var wrapper = window.parent.document.createElement('div');
+    wrapper.id = SIDEBAR_ID;
+    wrapper.innerHTML = `{_sb_html}`;
+    window.parent.document.body.appendChild(wrapper);
+}})();
+</script>
+"""
+_stc.html(_js_inject, height=0)
 
 # ── Floating chat button (bottom-right corner) ──────────────────────────────
 st.markdown("""
