@@ -1345,25 +1345,129 @@ def _show_chat_dialog():
         st.rerun()
 
 
-# ── Tabs ────────────────────────────────────────────────────────────────────
+# ── Navigation ──────────────────────────────────────────────────────────────
 _admin_mode = _is_admin()
 _coaching_mode = _is_coaching_lead()
 
-_base_tabs = ["Results", "Run Analysis", "Trends", "Google Sheet", "🐛 Bugs", "📊 L2 Manager", "🎯 L2 Reps"]
-if _coaching_mode:
-    _base_tabs.append("👥 Coaching")
-if _admin_mode:
-    _base_tabs.append("Admin")
+# ── Sidebar navigation ──────────────────────────────────────────────────────
+_NAV_ALWAYS = [
+    ("📊", "Results"),
+    ("📈", "Trends"),
+    ("🏆", "L2 Manager"),
+    ("🎯", "L2 Reps"),
+]
+_NAV_COACHING = [("👥", "Coaching")]
+_NAV_ADMIN = [
+    ("⚙️", "Run Analysis"),
+    ("🐛", "Bugs"),
+    ("📋", "Google Sheet"),
+    ("🔐", "Admin"),
+]
 
-_tab_handles = st.tabs(_base_tabs)
-tab1, tab2, tab3, tab5, tab_bugs = _tab_handles[0], _tab_handles[1], _tab_handles[2], _tab_handles[3], _tab_handles[4]
-tab_manager = _tab_handles[5]
-tab_rep = _tab_handles[6]
-_next_idx = 7
-tab_coaching = _tab_handles[_next_idx] if _coaching_mode else None
+_all_nav = list(_NAV_ALWAYS)
 if _coaching_mode:
-    _next_idx += 1
-tab_admin = _tab_handles[_next_idx] if _admin_mode else None
+    _all_nav += _NAV_COACHING
+if _admin_mode:
+    _all_nav += _NAV_ADMIN
+
+_valid_pages = [label for _, label in _all_nav]
+
+if "_active_page" not in st.session_state or st.session_state._active_page not in _valid_pages:
+    st.session_state._active_page = "Results"
+
+# Sidebar CSS — dark left nav styled like a SaaS product
+st.markdown("""
+<style>
+/* Hide default Streamlit sidebar header/collapse arrow */
+[data-testid="stSidebarCollapseButton"] { display: none !important; }
+section[data-testid="stSidebar"] > div:first-child {
+    padding-top: 0 !important;
+}
+section[data-testid="stSidebar"] {
+    background: #0f172a !important;
+    min-width: 200px !important;
+    max-width: 200px !important;
+    width: 200px !important;
+}
+/* Style each nav button */
+section[data-testid="stSidebar"] .stButton > button {
+    background: transparent !important;
+    border: none !important;
+    color: #64748b !important;
+    text-align: left !important;
+    width: 100% !important;
+    padding: 10px 14px !important;
+    border-radius: 8px !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    transition: background 0.15s, color 0.15s !important;
+    margin-bottom: 2px !important;
+}
+section[data-testid="stSidebar"] .stButton > button:hover {
+    background: #1e293b !important;
+    color: #e2e8f0 !important;
+}
+/* Active nav button — use a green accent to match dashboard theme */
+section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+    background: #1e293b !important;
+    color: #00E676 !important;
+    font-weight: 600 !important;
+}
+/* Sidebar divider */
+section[data-testid="stSidebar"] hr {
+    border-color: rgba(255,255,255,0.06) !important;
+    margin: 8px 0 !important;
+}
+/* Sidebar section label */
+section[data-testid="stSidebar"] .sidebar-section-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #334155;
+    padding: 12px 14px 4px;
+}
+/* Main area left margin to account for sidebar */
+.main .block-container { padding-left: 1rem !important; padding-right: 1rem !important; }
+</style>
+""", unsafe_allow_html=True)
+
+with st.sidebar:
+    # Logo / title area
+    st.markdown(
+        '<div style="padding:16px 14px 12px;border-bottom:1px solid rgba(255,255,255,0.06);'
+        'font-size:15px;font-weight:700;color:#e2e8f0;letter-spacing:-0.02em;">L2 Dashboard</div>',
+        unsafe_allow_html=True,
+    )
+
+    def _nav_btn(icon, label):
+        is_active = st.session_state._active_page == label
+        if st.button(
+            f"{icon}  {label}",
+            key=f"_nav_{label}",
+            type="primary" if is_active else "secondary",
+            use_container_width=True,
+        ):
+            st.session_state._active_page = label
+            st.rerun()
+
+    st.markdown('<div style="padding-top:8px;"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-section-label">Main</div>', unsafe_allow_html=True)
+    for _icon, _label in _NAV_ALWAYS:
+        _nav_btn(_icon, _label)
+
+    if _coaching_mode:
+        st.markdown('<div class="sidebar-section-label">Coaching</div>', unsafe_allow_html=True)
+        for _icon, _label in _NAV_COACHING:
+            _nav_btn(_icon, _label)
+
+    if _admin_mode:
+        st.divider()
+        st.markdown('<div class="sidebar-section-label">Admin</div>', unsafe_allow_html=True)
+        for _icon, _label in _NAV_ADMIN:
+            _nav_btn(_icon, _label)
+
+_page = st.session_state._active_page
 
 # ── Floating chat button (bottom-right corner) ──────────────────────────────
 st.markdown("""
@@ -1392,9 +1496,9 @@ with st.container():
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# TAB 1: RESULTS
+# PAGE — RESULTS
 # ═══════════════════════════════════════════════════════════════════════════
-with tab1:
+if _page == "Results":
     results_df = load_results()
     overrides = load_overrides()
 
@@ -2124,9 +2228,9 @@ with tab1:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# TAB 2: RUN ANALYSIS
+# PAGE — RUN ANALYSIS (admin only)
 # ═══════════════════════════════════════════════════════════════════════════
-with tab2:
+if _page == "Run Analysis":
     st.subheader("Run New Analysis")
 
     # Check if analysis is already running
@@ -2216,9 +2320,9 @@ with tab2:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# TAB 3: TRENDS
+# PAGE — TRENDS
 # ═══════════════════════════════════════════════════════════════════════════
-with tab3:
+if _page == "Trends":
     st.subheader("Trends & Insights")
 
     trends_df = load_results()
@@ -2438,9 +2542,9 @@ with tab3:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# TAB 5: GOOGLE SHEET
+# PAGE — GOOGLE SHEET (admin only)
 # ═══════════════════════════════════════════════════════════════════════════
-with tab5:
+if _page == "Google Sheet":
     st.subheader("Live Google Sheet")
     st.markdown("Edit the ticket data directly in the embedded Google Sheet below. Changes are saved automatically to the sheet.")
 
@@ -2554,7 +2658,7 @@ _SC_STATE_COLORS = {
     "Done":                 "#00E676",
 }
 
-with tab_bugs:
+if _page == "Bugs":
     st.markdown("**Customer Success Bug Tracker**")
     st.caption("Live from Shortcut · refreshes every 5 min · click any ticket to open in Shortcut")
 
@@ -2673,165 +2777,164 @@ def _prepare_l2_coaching_df():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# TAB L2 MANAGER (📊 L2 Manager)
+# PAGE — L2 MANAGER
 # ═══════════════════════════════════════════════════════════════════════════
-with tab_manager:
+if _page == "L2 Manager":
     _coaching_df = _prepare_l2_coaching_df()
     l2_coaching_tab.render_manager(_coaching_df)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# TAB L2 REPS (🎯 L2 Reps)
+# PAGE — L2 REPS
 # ═══════════════════════════════════════════════════════════════════════════
-with tab_rep:
+if _page == "L2 Reps":
+    _coaching_df = _prepare_l2_coaching_df()
     l2_coaching_tab.render_rep(_coaching_df)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# TAB COACHING (coaching leads only — Kailey + Ricky)
+# PAGE — COACHING (coaching leads only — Kailey + Ricky)
 # ═══════════════════════════════════════════════════════════════════════════
-if _coaching_mode and tab_coaching is not None:
-    with tab_coaching:
-        coaching_tab.render()
+if _page == "Coaching" and _coaching_mode:
+    coaching_tab.render()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# TAB ADMIN (admin users only)
+# PAGE — ADMIN (admin users only)
 # ═══════════════════════════════════════════════════════════════════════════
-if _admin_mode and tab_admin is not None:
-    with tab_admin:
-        st.subheader("Access Log")
-        st.markdown("Every time a user authenticates, their login is recorded here.")
+if _page == "Admin" and _admin_mode:
+    st.subheader("Access Log")
+    st.markdown("Every time a user authenticates, their login is recorded here.")
 
-        log_df = _load_access_log()
+    log_df = _load_access_log()
 
-        if log_df.empty:
-            st.info("No visits recorded yet. Logs are written when users sign in.")
-        else:
-            # Ensure consistent column naming
-            log_df.columns = [c.capitalize() for c in log_df.columns]
-            if "Timestamp" in log_df.columns:
-                log_df["Timestamp"] = pd.to_datetime(log_df["Timestamp"], errors="coerce")
-                log_df = log_df.sort_values("Timestamp", ascending=False).reset_index(drop=True)
-                log_df["Timestamp"] = log_df["Timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    if log_df.empty:
+        st.info("No visits recorded yet. Logs are written when users sign in.")
+    else:
+        # Ensure consistent column naming
+        log_df.columns = [c.capitalize() for c in log_df.columns]
+        if "Timestamp" in log_df.columns:
+            log_df["Timestamp"] = pd.to_datetime(log_df["Timestamp"], errors="coerce")
+            log_df = log_df.sort_values("Timestamp", ascending=False).reset_index(drop=True)
+            log_df["Timestamp"] = log_df["Timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
-            # Summary metrics
-            total_visits = len(log_df)
-            unique_users = log_df["Email"].nunique() if "Email" in log_df.columns else 0
-            m1, m2 = st.columns(2)
-            m1.metric("Total logins", total_visits)
-            m2.metric("Unique users", unique_users)
+        # Summary metrics
+        total_visits = len(log_df)
+        unique_users = log_df["Email"].nunique() if "Email" in log_df.columns else 0
+        m1, m2 = st.columns(2)
+        m1.metric("Total logins", total_visits)
+        m2.metric("Unique users", unique_users)
 
-            st.divider()
-
-            # Per-user breakdown
-            if "Email" in log_df.columns:
-                st.markdown("**Logins per user**")
-                counts = (
-                    log_df.groupby("Email")
-                    .agg(Logins=("Email", "count"), Last_seen=("Timestamp", "max"))
-                    .reset_index()
-                    .rename(columns={"Last_seen": "Last seen"})
-                    .sort_values("Logins", ascending=False)
-                )
-                st.dataframe(counts, use_container_width=True, hide_index=True)
-
-                st.divider()
-
-            # Full log
-            st.markdown("**Full login history**")
-            st.dataframe(log_df, use_container_width=True, hide_index=True)
-
-        # ── Activity Tracking ────────────────────────────────────────
         st.divider()
-        st.subheader("Activity Tracking")
-        st.markdown("Session-level tracking: who visited, when, and for how long.")
 
-        activity_df = _load_activity_log()
-        if activity_df.empty:
-            st.info("No activity recorded yet. Activity is tracked automatically for authenticated users.")
-        else:
-            # Normalize columns
-            col_remap = {}
-            for c in activity_df.columns:
-                cl = c.lower().replace(" ", "_").replace("(", "").replace(")", "")
-                if "session" in cl:
-                    col_remap[c] = "Session ID"
-                elif "email" in cl:
-                    col_remap[c] = "Email"
-                elif "name" in cl and "session" not in cl:
-                    col_remap[c] = "Name"
-                elif "start" in cl:
-                    col_remap[c] = "Start"
-                elif "last" in cl:
-                    col_remap[c] = "Last Active"
-                elif "duration" in cl:
-                    col_remap[c] = "Duration (min)"
-            activity_df = activity_df.rename(columns=col_remap)
-
-            if "Last Active" in activity_df.columns:
-                activity_df["Last Active"] = pd.to_datetime(activity_df["Last Active"], errors="coerce")
-            if "Start" in activity_df.columns:
-                activity_df["Start"] = pd.to_datetime(activity_df["Start"], errors="coerce")
-            if "Duration (min)" in activity_df.columns:
-                activity_df["Duration (min)"] = pd.to_numeric(activity_df["Duration (min)"], errors="coerce")
-
-            # Currently active users (heartbeat within last 2 minutes)
-            if "Last Active" in activity_df.columns:
-                now = datetime.now()
-                active = activity_df[activity_df["Last Active"] >= now - timedelta(minutes=2)]
-                st.markdown("**Currently active**")
-                if active.empty:
-                    st.caption("No users currently active.")
-                else:
-                    for _, row in active.iterrows():
-                        label = row.get("Name") or row.get("Email", "Unknown")
-                        dur = row.get("Duration (min)", 0)
-                        st.markdown(f"🟢 **{label}** — active for {dur:.0f} min")
+        # Per-user breakdown
+        if "Email" in log_df.columns:
+            st.markdown("**Logins per user**")
+            counts = (
+                log_df.groupby("Email")
+                .agg(Logins=("Email", "count"), Last_seen=("Timestamp", "max"))
+                .reset_index()
+                .rename(columns={"Last_seen": "Last seen"})
+                .sort_values("Logins", ascending=False)
+            )
+            st.dataframe(counts, use_container_width=True, hide_index=True)
 
             st.divider()
 
-            # Summary metrics
-            total_sessions = len(activity_df)
-            unique_visitors = activity_df["Email"].nunique() if "Email" in activity_df.columns else 0
-            avg_duration = activity_df["Duration (min)"].mean() if "Duration (min)" in activity_df.columns else 0
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Total sessions", total_sessions)
-            m2.metric("Unique visitors", unique_visitors)
-            m3.metric("Avg duration (min)", f"{avg_duration:.1f}")
+        # Full log
+        st.markdown("**Full login history**")
+        st.dataframe(log_df, use_container_width=True, hide_index=True)
 
-            st.divider()
+    # ── Activity Tracking ────────────────────────────────────────
+    st.divider()
+    st.subheader("Activity Tracking")
+    st.markdown("Session-level tracking: who visited, when, and for how long.")
 
-            # Per-user usage breakdown
-            if "Email" in activity_df.columns and "Duration (min)" in activity_df.columns:
-                st.markdown("**Usage per user**")
-                la_col = "Last Active" if "Last Active" in activity_df.columns else "Start"
-                user_stats = (
-                    activity_df.groupby("Email")
-                    .agg(
-                        Sessions=("Email", "count"),
-                        Total_min=("Duration (min)", "sum"),
-                        Avg_min=("Duration (min)", "mean"),
-                        Last_visit=(la_col, "max"),
-                    )
-                    .reset_index()
-                    .rename(columns={"Total_min": "Total (min)", "Avg_min": "Avg (min)", "Last_visit": "Last visit"})
-                    .sort_values("Total (min)", ascending=False)
+    activity_df = _load_activity_log()
+    if activity_df.empty:
+        st.info("No activity recorded yet. Activity is tracked automatically for authenticated users.")
+    else:
+        # Normalize columns
+        col_remap = {}
+        for c in activity_df.columns:
+            cl = c.lower().replace(" ", "_").replace("(", "").replace(")", "")
+            if "session" in cl:
+                col_remap[c] = "Session ID"
+            elif "email" in cl:
+                col_remap[c] = "Email"
+            elif "name" in cl and "session" not in cl:
+                col_remap[c] = "Name"
+            elif "start" in cl:
+                col_remap[c] = "Start"
+            elif "last" in cl:
+                col_remap[c] = "Last Active"
+            elif "duration" in cl:
+                col_remap[c] = "Duration (min)"
+        activity_df = activity_df.rename(columns=col_remap)
+
+        if "Last Active" in activity_df.columns:
+            activity_df["Last Active"] = pd.to_datetime(activity_df["Last Active"], errors="coerce")
+        if "Start" in activity_df.columns:
+            activity_df["Start"] = pd.to_datetime(activity_df["Start"], errors="coerce")
+        if "Duration (min)" in activity_df.columns:
+            activity_df["Duration (min)"] = pd.to_numeric(activity_df["Duration (min)"], errors="coerce")
+
+        # Currently active users (heartbeat within last 2 minutes)
+        if "Last Active" in activity_df.columns:
+            now = datetime.now()
+            active = activity_df[activity_df["Last Active"] >= now - timedelta(minutes=2)]
+            st.markdown("**Currently active**")
+            if active.empty:
+                st.caption("No users currently active.")
+            else:
+                for _, row in active.iterrows():
+                    label = row.get("Name") or row.get("Email", "Unknown")
+                    dur = row.get("Duration (min)", 0)
+                    st.markdown(f"🟢 **{label}** — active for {dur:.0f} min")
+
+        st.divider()
+
+        # Summary metrics
+        total_sessions = len(activity_df)
+        unique_visitors = activity_df["Email"].nunique() if "Email" in activity_df.columns else 0
+        avg_duration = activity_df["Duration (min)"].mean() if "Duration (min)" in activity_df.columns else 0
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total sessions", total_sessions)
+        m2.metric("Unique visitors", unique_visitors)
+        m3.metric("Avg duration (min)", f"{avg_duration:.1f}")
+
+        st.divider()
+
+        # Per-user usage breakdown
+        if "Email" in activity_df.columns and "Duration (min)" in activity_df.columns:
+            st.markdown("**Usage per user**")
+            la_col = "Last Active" if "Last Active" in activity_df.columns else "Start"
+            user_stats = (
+                activity_df.groupby("Email")
+                .agg(
+                    Sessions=("Email", "count"),
+                    Total_min=("Duration (min)", "sum"),
+                    Avg_min=("Duration (min)", "mean"),
+                    Last_visit=(la_col, "max"),
                 )
-                user_stats["Total (min)"] = user_stats["Total (min)"].round(1)
-                user_stats["Avg (min)"] = user_stats["Avg (min)"].round(1)
-                if "Last visit" in user_stats.columns:
-                    user_stats["Last visit"] = user_stats["Last visit"].dt.strftime("%Y-%m-%d %H:%M:%S")
-                st.dataframe(user_stats, use_container_width=True, hide_index=True)
-                st.divider()
+                .reset_index()
+                .rename(columns={"Total_min": "Total (min)", "Avg_min": "Avg (min)", "Last_visit": "Last visit"})
+                .sort_values("Total (min)", ascending=False)
+            )
+            user_stats["Total (min)"] = user_stats["Total (min)"].round(1)
+            user_stats["Avg (min)"] = user_stats["Avg (min)"].round(1)
+            if "Last visit" in user_stats.columns:
+                user_stats["Last visit"] = user_stats["Last visit"].dt.strftime("%Y-%m-%d %H:%M:%S")
+            st.dataframe(user_stats, use_container_width=True, hide_index=True)
+            st.divider()
 
-            # Full session history
-            st.markdown("**Full session history**")
-            display_df = activity_df.sort_values("Start", ascending=False).reset_index(drop=True) if "Start" in activity_df.columns else activity_df
-            fmt_df = display_df.copy()
-            for col in ["Start", "Last Active"]:
-                if col in fmt_df.columns:
-                    fmt_df[col] = fmt_df[col].dt.strftime("%Y-%m-%d %H:%M:%S")
-            if "Duration (min)" in fmt_df.columns:
-                fmt_df["Duration (min)"] = fmt_df["Duration (min)"].round(1)
-            st.dataframe(fmt_df, use_container_width=True, hide_index=True)
+        # Full session history
+        st.markdown("**Full session history**")
+        display_df = activity_df.sort_values("Start", ascending=False).reset_index(drop=True) if "Start" in activity_df.columns else activity_df
+        fmt_df = display_df.copy()
+        for col in ["Start", "Last Active"]:
+            if col in fmt_df.columns:
+                fmt_df[col] = fmt_df[col].dt.strftime("%Y-%m-%d %H:%M:%S")
+        if "Duration (min)" in fmt_df.columns:
+            fmt_df["Duration (min)"] = fmt_df["Duration (min)"].round(1)
+        st.dataframe(fmt_df, use_container_width=True, hide_index=True)
