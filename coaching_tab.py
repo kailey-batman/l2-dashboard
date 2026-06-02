@@ -504,7 +504,12 @@ def _render_per_rep_tabs(roster_rows, weekly_df: pd.DataFrame):
                 def _fmt_int(val):
                     return int(val) if pd.notna(val) else "n/a"
 
-                m_cols[0].metric("New convos", _fmt_int(latest.get("New conversations")))
+                # Convos tile: prefer "New conversations" (Intercom dashboard semantic),
+                # fall back to "Conversations reviewed" if not populated
+                new_convs = latest.get("New conversations")
+                if not pd.notna(new_convs):
+                    new_convs = latest.get("Conversations reviewed")
+                m_cols[0].metric("Convos", _fmt_int(new_convs))
                 m_cols[1].metric("FRT", _fmt_num(latest.get("Median first response (m)"), " m"))
                 m_cols[2].metric("TTC", _fmt_num(latest.get("Median time to close (h)"), " h"))
                 m_cols[3].metric(
