@@ -1401,21 +1401,30 @@ _valid_pages = [label for _, label in _all_nav]
 if "_active_page" not in st.session_state or st.session_state._active_page not in _valid_pages:
     st.session_state._active_page = "Results"
 
-# Sidebar CSS — dark left nav styled like a SaaS product
+# Sidebar CSS — dark left nav, always visible
 st.markdown("""
 <style>
-/* Hide default Streamlit sidebar header/collapse arrow */
-[data-testid="stSidebarCollapseButton"] { display: none !important; }
+/* ── Force sidebar permanently open — override Streamlit's translateX collapse ── */
+section[data-testid="stSidebar"] {
+    display: block !important;
+    visibility: visible !important;
+    transform: none !important;
+    transition: none !important;
+    background: #0f172a !important;
+    min-width: 220px !important;
+    max-width: 220px !important;
+    width: 220px !important;
+    z-index: 100;
+}
 section[data-testid="stSidebar"] > div:first-child {
     padding-top: 0 !important;
 }
-section[data-testid="stSidebar"] {
-    background: #0f172a !important;
-    min-width: 200px !important;
-    max-width: 200px !important;
-    width: 200px !important;
-}
-/* Style each nav button */
+/* Hide the collapse/expand toggle buttons entirely */
+[data-testid="stSidebarCollapseButton"],
+[data-testid="collapsedControl"],
+button[kind="header"] { display: none !important; }
+
+/* Nav buttons */
 section[data-testid="stSidebar"] .stButton > button {
     background: transparent !important;
     border: none !important;
@@ -1428,33 +1437,35 @@ section[data-testid="stSidebar"] .stButton > button {
     font-weight: 500 !important;
     transition: background 0.15s, color 0.15s !important;
     margin-bottom: 2px !important;
+    box-shadow: none !important;
 }
 section[data-testid="stSidebar"] .stButton > button:hover {
     background: #1e293b !important;
     color: #e2e8f0 !important;
 }
-/* Active nav button — use a green accent to match dashboard theme */
-section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+/* Active page button */
+section[data-testid="stSidebar"] .stButton > button[kind="primary"],
+section[data-testid="stSidebar"] .stButton > button[data-active="true"] {
     background: #1e293b !important;
     color: #00E676 !important;
     font-weight: 600 !important;
 }
-/* Sidebar divider */
+/* Divider */
 section[data-testid="stSidebar"] hr {
     border-color: rgba(255,255,255,0.06) !important;
     margin: 8px 0 !important;
 }
-/* Sidebar section label */
-section[data-testid="stSidebar"] .sidebar-section-label {
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: #334155;
-    padding: 12px 14px 4px;
+/* Section labels */
+.sidebar-section-label {
+    font-size: 10px !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.08em !important;
+    color: #475569 !important;
+    padding: 10px 14px 4px !important;
 }
-/* Main area left margin to account for sidebar */
-.main .block-container { padding-left: 1rem !important; padding-right: 1rem !important; }
+/* Push main content right to clear sidebar */
+.main > div { margin-left: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
