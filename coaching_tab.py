@@ -272,7 +272,14 @@ def _render_date_filter(weekly_df):
     today = datetime.now().date()
 
     def _clamp(s, e):
-        return max(s, data_min), min(e, data_max)
+        s_c = max(s, data_min)
+        e_c = min(e, data_max)
+        if s_c > e_c:
+            # Preset range is entirely outside the available data (e.g., "Last week"
+            # when no data has been written for it yet). Default to the latest day
+            # of data so the widget stays valid; the filtered table will show "no data".
+            return data_max, data_max
+        return s_c, e_c
 
     def _last_week():
         weekday = today.weekday()  # Mon=0, Sun=6
