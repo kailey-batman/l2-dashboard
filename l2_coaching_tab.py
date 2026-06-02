@@ -378,7 +378,10 @@ def render_rep(df: pd.DataFrame):
 
     # ── 5. Recent activity ──────────────────────────────────────────────
     st.markdown("### Recent tickets")
-    recent = rep_df.sort_values("_parsed_date", ascending=False).head(15)
+    if "_parsed_date" in rep_df.columns:
+        recent = rep_df.sort_values("_parsed_date", ascending=False).head(15)
+    else:
+        recent = rep_df.head(15)
     if not recent.empty:
         show = [c for c in ["created_at", "name", "category", "l2_involvement", "decision", "shortcut_url"]
                 if c in recent.columns]

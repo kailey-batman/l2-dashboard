@@ -2517,6 +2517,12 @@ def _prepare_l2_coaching_df():
 
     df["_level"] = df["l2_involvement"].apply(_parse_level)
 
+    # Parse created_at → _parsed_date for sorting and month grouping
+    if "created_at" in df.columns:
+        df["_parsed_date"] = pd.to_datetime(df["created_at"], errors="coerce")
+    else:
+        df["_parsed_date"] = pd.NaT
+
     # Month string for trend grouping
     if "_parsed_date" in df.columns:
         df["_month"] = df["_parsed_date"].dt.to_period("M").astype(str)
