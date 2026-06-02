@@ -24,6 +24,8 @@ import re
 import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
 
+import coaching_tab
+
 # ── L2 Supported Capabilities ──────────────────────────────────────────────
 L2_CAPABILITIES = """
 L2 Support can handle the following types of tasks:
@@ -215,9 +217,9 @@ def get_gspread_client():
     return gspread.authorize(creds)
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300, show_spinner=False)
 def load_google_sheet():
-    """Fetch the Google Sheet as a DataFrame. Cached for 60 seconds."""
+    """Fetch the Google Sheet as a DataFrame. Cached for 5 minutes."""
     try:
         client = get_gspread_client()
         if client is None:
@@ -241,7 +243,11 @@ def load_google_sheet():
         data = rows[1:]
         return pd.DataFrame(data, columns=unique_headers)
     except Exception as e:
-        st.error(f"Google Sheet error: {e}")
+        _err = str(e)
+        if "429" in _err or "Quota exceeded" in _err:
+            st.warning("Google Sheets rate limit hit — showing cached data. Will retry in a few minutes.")
+        else:
+            st.error(f"Google Sheet error: {e}")
         return None
 
 
@@ -408,9 +414,9 @@ def save_results_to_sheet(results):
             json.dump(results, f, indent=2)
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def load_results_from_sheet():
-    """Load results from the Results tab in Google Sheets."""
+    """Load results from the Results tab in Google Sheets. Cached for 5 minutes."""
     try:
         _, ws = _get_or_create_worksheet(RESULTS_SHEET_TAB, headers=RESULTS_COLUMNS)
         if ws is None:
@@ -423,7 +429,9 @@ def load_results_from_sheet():
         if "confidence" in df.columns:
             df["confidence"] = pd.to_numeric(df["confidence"], errors="coerce").fillna(0).astype(int)
         return df
-    except Exception:
+    except Exception as e:
+        if "429" in str(e) or "Quota exceeded" in str(e):
+            return None  # caller falls back to local file
         return None
 
 
@@ -882,6 +890,14 @@ def _is_admin():
     return bool(admins) and email in admins
 
 
+def _is_coaching_lead():
+    """Coaching tab is visible only to emails in DASHBOARD_COACHING_EMAILS."""
+    email = st.session_state.get("_auth_user", {}).get("email", "").lower()
+    raw = os.environ.get("DASHBOARD_COACHING_EMAILS", "")
+    coaches = [e.strip().lower() for e in raw.split(",") if e.strip()]
+    return bool(coaches) and email in coaches
+
+
 def _log_visit(user_info):
     """Append a login event to the local file and Google Sheets Access Log tab."""
     entry = {
@@ -1330,13 +1346,21 @@ def _show_chat_dialog():
 
 # ── Tabs ────────────────────────────────────────────────────────────────────
 _admin_mode = _is_admin()
+_coaching_mode = _is_coaching_lead()
+
+_base_tabs = ["Results", "Run Analysis", "Trends", "Google Sheet", "🐛 Bugs"]
+if _coaching_mode:
+    _base_tabs.append("👥 Coaching")
 if _admin_mode:
-    tab1, tab2, tab3, tab5, tab_bugs, tab_admin = st.tabs(
-        ["Results", "Run Analysis", "Trends", "Google Sheet", "🐛 Bugs", "Admin"]
-    )
-else:
-    tab1, tab2, tab3, tab5, tab_bugs = st.tabs(["Results", "Run Analysis", "Trends", "Google Sheet", "🐛 Bugs"])
-    tab_admin = None
+    _base_tabs.append("Admin")
+
+_tab_handles = st.tabs(_base_tabs)
+tab1, tab2, tab3, tab5, tab_bugs = _tab_handles[0], _tab_handles[1], _tab_handles[2], _tab_handles[3], _tab_handles[4]
+_next_idx = 5
+tab_coaching = _tab_handles[_next_idx] if _coaching_mode else None
+if _coaching_mode:
+    _next_idx += 1
+tab_admin = _tab_handles[_next_idx] if _admin_mode else None
 
 # ── Floating chat button (bottom-right corner) ──────────────────────────────
 st.markdown("""
@@ -2605,6 +2629,14 @@ with tab_bugs:
                         f'{html_cards}</div>',
                         unsafe_allow_html=True,
                     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB COACHING (coaching leads only — Kailey + Ricky)
+# ═══════════════════════════════════════════════════════════════════════════
+if _coaching_mode and tab_coaching is not None:
+    with tab_coaching:
+        coaching_tab.render()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
