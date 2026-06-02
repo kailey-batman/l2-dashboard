@@ -346,19 +346,28 @@ def parse_shortcut_activity_for_l2(shortcut_activity):
 @st.cache_data(ttl=60, show_spinner=False)
 def _build_live_map_from_sheet(sheet_df):
     """Parse Shortcut activity from every sheet row and return a name→(involvement, engineer) dict.
-    Cached so the expensive iterrows + regex run only once per 60s, not on every render."""
+    Cached so the expensive iterrows + regex run only once per 60s, not on every render.
+    Archived tickets are excluded so they don't inflate L2 involvement counts."""
     live_map = {}
     if sheet_df is None:
         return live_map, None
-    activity_col = next((c for c in sheet_df.columns if "activity" in c.lower()), None)
-    name_col = next((c for c in sheet_df.columns if c.lower() == "name"), None)
+    activity_col  = next((c for c in sheet_df.columns if "activity" in c.lower()), None)
+    name_col      = next((c for c in sheet_df.columns if c.lower() == "name"), None)
+    archived_col  = next((c for c in sheet_df.columns if c.lower() == "archived"), None)
+    state_col     = next((c for c in sheet_df.columns if c.lower() == "state"), None)
     if not activity_col or not name_col:
         return live_map, f"Could not find the Shortcut activity column. Sheet columns: {list(sheet_df.columns)}"
     for _, sr in sheet_df.iterrows():
         tname = str(sr.get(name_col, "")).strip()
+        if not tname:
+            continue
+        # Skip archived tickets — they shouldn't count towards L2 involvement
+        if archived_col and str(sr.get(archived_col, "")).strip().lower() in ("true", "1", "yes"):
+            continue
+        if state_col and str(sr.get(state_col, "")).strip().lower() == "archived":
+            continue
         activity_text = str(sr.get(activity_col, "")).strip()
-        if tname:
-            live_map[tname] = parse_shortcut_activity_for_l2(activity_text)
+        live_map[tname] = parse_shortcut_activity_for_l2(activity_text)
     return live_map, None
 
 
@@ -442,6 +451,23 @@ def _apply_result_defaults(df):
         if col not in df.columns:
             df[col] = default
     return df
+
+
+def _filter_archived(df):
+    """Remove archived tickets from a results DataFrame.
+
+    Checks two sources (whichever columns are present):
+      • A dedicated 'archived' column with truthy values (true/1/yes)
+      • The 'state' column containing the literal string 'archived'
+    """
+    if df is None or df.empty:
+        return df
+    mask = pd.Series([True] * len(df), index=df.index)
+    if "archived" in df.columns:
+        mask &= ~df["archived"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
+    if "state" in df.columns:
+        mask &= df["state"].astype(str).str.strip().str.lower() != "archived"
+    return df[mask].copy()
 
 
 def load_results():
@@ -1499,7 +1525,7 @@ with st.container():
 # PAGE — RESULTS
 # ═══════════════════════════════════════════════════════════════════════════
 if _page == "Results":
-    results_df = load_results()
+    results_df = _filter_archived(load_results())
     overrides = load_overrides()
 
     # ── Build live L2 data from ALL sheet rows ───────────────────────
@@ -2325,7 +2351,7 @@ if _page == "Run Analysis":
 if _page == "Trends":
     st.subheader("Trends & Insights")
 
-    trends_df = load_results()
+    trends_df = _filter_archived(load_results())
     if trends_df is not None and not trends_df.empty:
         if "category" not in trends_df.columns:
             trends_df["category"] = "Other"
@@ -2743,15 +2769,31 @@ if _page == "Bugs":
 # ═══════════════════════════════════════════════════════════════════════════
 def _prepare_l2_coaching_df():
     """
-    Returns a copy of results_df enriched with coaching columns:
+    Load, filter, and enrich results data for coaching views.
+
+    Loads fresh from the Results sheet (filtered for archived tickets),
+    patches live L2 involvement from the Tickets sheet, then adds:
       _level  (int 1-5 or None) — numeric level extracted from l2_involvement
       _month  (str "YYYY-MM")   — from _parsed_date
     Only rows where l2_engineer is Jayson or Sean are kept.
     """
-    if results_df is None or results_df.empty:
+    _df = _filter_archived(load_results())
+    if _df is None or _df.empty:
         return pd.DataFrame()
 
-    df = results_df.copy()
+    # Patch live L2 involvement from the Tickets sheet
+    _sheet = load_google_sheet()
+    if _sheet is not None:
+        _lmap, _ = _build_live_map_from_sheet(_sheet)
+        if _lmap:
+            _df["l2_involvement"] = _df["name"].map(
+                lambda n: _lmap.get(n, ("None", "None"))[0]
+            ).fillna("None")
+            _df["l2_engineer"] = _df["name"].map(
+                lambda n: _lmap.get(n, ("None", "None"))[1]
+            ).fillna("None")
+
+    df = _df.copy()
 
     # Extract numeric level from l2_involvement string (e.g. "5 - Independent…")
     def _parse_level(val):
