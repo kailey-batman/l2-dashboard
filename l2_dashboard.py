@@ -25,6 +25,7 @@ import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
 
 import coaching_tab
+import l2_coaching_tab
 
 # ── L2 Supported Capabilities ──────────────────────────────────────────────
 L2_CAPABILITIES = """
@@ -1348,7 +1349,7 @@ def _show_chat_dialog():
 _admin_mode = _is_admin()
 _coaching_mode = _is_coaching_lead()
 
-_base_tabs = ["Results", "Run Analysis", "Trends", "Google Sheet", "🐛 Bugs"]
+_base_tabs = ["Results", "Run Analysis", "Trends", "Google Sheet", "🐛 Bugs", "📊 L2 Manager", "🎯 L2 Reps"]
 if _coaching_mode:
     _base_tabs.append("👥 Coaching")
 if _admin_mode:
@@ -1356,7 +1357,9 @@ if _admin_mode:
 
 _tab_handles = st.tabs(_base_tabs)
 tab1, tab2, tab3, tab5, tab_bugs = _tab_handles[0], _tab_handles[1], _tab_handles[2], _tab_handles[3], _tab_handles[4]
-_next_idx = 5
+tab_manager = _tab_handles[5]
+tab_rep = _tab_handles[6]
+_next_idx = 7
 tab_coaching = _tab_handles[_next_idx] if _coaching_mode else None
 if _coaching_mode:
     _next_idx += 1
@@ -2629,6 +2632,59 @@ with tab_bugs:
                         f'{html_cards}</div>',
                         unsafe_allow_html=True,
                     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HELPER — build coaching DataFrame from live results_df
+# ═══════════════════════════════════════════════════════════════════════════
+def _prepare_l2_coaching_df():
+    """
+    Returns a copy of results_df enriched with coaching columns:
+      _level  (int 1-5 or None) — numeric level extracted from l2_involvement
+      _month  (str "YYYY-MM")   — from _parsed_date
+    Only rows where l2_engineer is Jayson or Sean are kept.
+    """
+    if results_df is None or results_df.empty:
+        return pd.DataFrame()
+
+    df = results_df.copy()
+
+    # Extract numeric level from l2_involvement string (e.g. "5 - Independent…")
+    def _parse_level(val):
+        s = str(val).strip()
+        if s and s[0].isdigit():
+            try:
+                return int(s[0])
+            except ValueError:
+                return None
+        return None
+
+    df["_level"] = df["l2_involvement"].apply(_parse_level)
+
+    # Month string for trend grouping
+    if "_parsed_date" in df.columns:
+        df["_month"] = df["_parsed_date"].dt.to_period("M").astype(str)
+    else:
+        df["_month"] = "NaT"
+
+    # Keep only rows with an assigned rep
+    df = df[df["l2_engineer"].isin(["Jayson", "Sean"])].copy()
+    return df
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB L2 MANAGER (📊 L2 Manager)
+# ═══════════════════════════════════════════════════════════════════════════
+with tab_manager:
+    _coaching_df = _prepare_l2_coaching_df()
+    l2_coaching_tab.render_manager(_coaching_df)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB L2 REPS (🎯 L2 Reps)
+# ═══════════════════════════════════════════════════════════════════════════
+with tab_rep:
+    l2_coaching_tab.render_rep(_coaching_df)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
