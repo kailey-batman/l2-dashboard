@@ -456,6 +456,11 @@ def _render_team_rollups(weekly_df: pd.DataFrame):
     if trend.empty:
         st.caption("No CSAT data yet.")
     else:
+        # Auto-zoom the y-axis so 80-100 variation is visible instead of compressing to the top
+        y_min = max(0, float(trend["CSAT"].min()) - 5)
+        y_max = min(105, float(trend["CSAT"].max()) + 5)
+        if y_max - y_min < 20:
+            y_min = max(0, y_max - 25)
         fig2 = go.Figure()
         for rep in sorted(trend["Rep"].unique()):
             sub = trend[trend["Rep"] == rep].sort_values("_week_dt")
@@ -463,16 +468,17 @@ def _render_team_rollups(weekly_df: pd.DataFrame):
                 x=sub["_week_dt"], y=sub["CSAT"], mode="lines+markers", name=rep,
             ))
         fig2.update_layout(
-            height=320,
+            height=360,
             margin=dict(l=10, r=10, t=20, b=10),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             plot_bgcolor="#373E47",
             paper_bgcolor="#2D333B",
             font=dict(color="#E0E0E0"),
             xaxis=dict(title="Week of", gridcolor="#4A5160"),
-            yaxis=dict(title="CSAT %", gridcolor="#4A5160", range=[0, 105]),
+            yaxis=dict(title="CSAT %", gridcolor="#4A5160", range=[y_min, y_max]),
         )
         st.plotly_chart(fig2, use_container_width=True)
+        st.caption("_CSAT % = share of rated conversations that scored 4 or 5._")
 
 
 def _render_rep_trend_chart(rep_weeks: pd.DataFrame, rep_name: str):
@@ -484,6 +490,15 @@ def _render_rep_trend_chart(rep_weeks: pd.DataFrame, rep_name: str):
         return
 
     convs = df["Conversations reviewed"].fillna(df.get("New conversations"))
+    csat_series = df["CSAT"].dropna()
+    if not csat_series.empty:
+        y_min = max(0, float(csat_series.min()) - 5)
+        y_max = min(105, float(csat_series.max()) + 5)
+        if y_max - y_min < 20:
+            y_min = max(0, y_max - 25)
+    else:
+        y_min, y_max = 0, 105
+
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df["_week_dt"], y=df["CSAT"], mode="lines+markers", name="CSAT %",
@@ -494,7 +509,7 @@ def _render_rep_trend_chart(rep_weeks: pd.DataFrame, rep_name: str):
         marker_color="#42A5F5", opacity=0.55,
     ))
     fig.update_layout(
-        height=280,
+        height=300,
         margin=dict(l=10, r=10, t=20, b=10),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         plot_bgcolor="#373E47",
@@ -503,7 +518,7 @@ def _render_rep_trend_chart(rep_weeks: pd.DataFrame, rep_name: str):
         xaxis=dict(title="Week of", gridcolor="#4A5160"),
         yaxis=dict(title="Conversations", gridcolor="#4A5160"),
         yaxis2=dict(title="CSAT %", overlaying="y", side="right",
-                    range=[0, 105], gridcolor="#4A5160", showgrid=False),
+                    range=[y_min, y_max], gridcolor="#4A5160", showgrid=False),
         title=dict(text=f"{rep_name} — CSAT and volume over time", x=0, font=dict(size=14)),
     )
     st.plotly_chart(fig, use_container_width=True)
