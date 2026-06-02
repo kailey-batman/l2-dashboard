@@ -1424,36 +1424,19 @@ section[data-testid="stSidebar"] > div:first-child {
 [data-testid="collapsedControl"],
 button[kind="header"] { display: none !important; }
 
-/* ── Radio-based nav items ── */
-/* Hide the radio circle dots */
-section[data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] p { display: none; }
-section[data-testid="stSidebar"] .stRadio > div { gap: 2px !important; }
-section[data-testid="stSidebar"] .stRadio label {
-    display: flex !important;
-    align-items: center !important;
-    padding: 9px 14px !important;
+/* ── Radio nav — minimal safe styling ── */
+/* Tighten spacing between options */
+section[data-testid="stSidebar"] .stRadio > div > div { gap: 4px !important; }
+/* Style each option row */
+section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label {
+    padding: 8px 10px !important;
     border-radius: 8px !important;
-    cursor: pointer !important;
     color: #94a3b8 !important;
     font-size: 14px !important;
-    font-weight: 500 !important;
-    transition: background 0.15s, color 0.15s !important;
-    width: 100% !important;
 }
-section[data-testid="stSidebar"] .stRadio label:hover {
+section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:hover {
     background: #1e293b !important;
     color: #e2e8f0 !important;
-}
-/* Hide the actual radio input circle */
-section[data-testid="stSidebar"] .stRadio label > div:first-child {
-    display: none !important;
-}
-/* Active (checked) item */
-section[data-testid="stSidebar"] .stRadio label[data-checked="true"],
-section[data-testid="stSidebar"] .stRadio input:checked + div {
-    background: #1e293b !important;
-    color: #00E676 !important;
-    font-weight: 600 !important;
 }
 </style>
 """, unsafe_allow_html=True)
