@@ -1149,43 +1149,38 @@ st.markdown("""
     [data-testid="collapsedControl"] { display: none !important; }
 
     /* Push main content right to make room for custom sidebar */
-    [data-testid="stMain"] { margin-left: 60px !important; }
+    [data-testid="stMain"] { margin-left: 176px !important; }
 
     /* Fixed left sidebar */
     .cst-sidebar {
-        position: fixed; left: 0; top: 0; width: 60px; height: 100vh;
+        position: fixed; left: 0; top: 0; width: 176px; height: 100vh;
         background: #161b22; display: flex; flex-direction: column;
         z-index: 9999; border-right: 1px solid rgba(255,255,255,0.06);
     }
     .cst-logo {
         height: 56px; display: flex; align-items: center; justify-content: center;
+        gap: 10px; padding: 0 16px;
         border-bottom: 1px solid rgba(255,255,255,0.06); color: #00E676; flex-shrink: 0;
+        font-weight: 700; font-size: 14px; letter-spacing: -0.01em;
     }
     .cst-nav {
         flex: 1; display: flex; flex-direction: column;
-        padding: 8px 6px; gap: 4px; overflow-y: auto;
+        padding: 8px 8px; gap: 2px; overflow-y: auto;
     }
     .cst-sep {
-        height: 1px; background: rgba(255,255,255,0.06); margin: 4px 6px;
+        height: 1px; background: rgba(255,255,255,0.06); margin: 6px 8px;
     }
     .cst-item {
-        width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;
-        border-radius: 10px; color: #64748b; cursor: pointer; text-decoration: none;
-        transition: background 0.2s, color 0.2s; position: relative;
+        width: 100%; height: 40px; display: flex; align-items: center;
+        gap: 10px; padding: 0 12px;
+        border-radius: 8px; color: #64748b; cursor: pointer; text-decoration: none;
+        transition: background 0.2s, color 0.2s;
         border: none; background: none; flex-shrink: 0;
+        font-size: 13px; font-weight: 500; font-family: inherit;
     }
-    .cst-item:hover { background: #1e293b; color: #e2e8f0; }
-    .cst-item.active { background: #00E676; color: #161b22; }
-    /* Tooltip */
-    .cst-item::after {
-        content: attr(title); position: absolute; left: calc(100% + 12px); top: 50%;
-        transform: translateY(-50%); background: #1e293b; color: #f1f5f9;
-        padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 500;
-        white-space: nowrap; pointer-events: none; opacity: 0;
-        transition: opacity 0.15s; z-index: 10000;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-    }
-    .cst-item:hover::after { opacity: 1; }
+    .cst-item:hover { background: #1e293b; color: #e2e8f0; text-decoration: none; }
+    .cst-item.active { background: #00E676 !important; color: #161b22 !important; }
+    .cst-item svg { flex-shrink: 0; }
 
     /* ── General layout ─────────────────────────────────────────────── */
     .header-container {
@@ -1438,58 +1433,65 @@ def _nav_cls(tab_id: str) -> str:
 # Manager section — only rendered for coaching leads
 _manager_links = f"""
     <div class="cst-sep"></div>
-    <a href="?tab=manager" target="_self" class="{_nav_cls('manager')}" title="L2 Manager">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <a href="?tab=manager" target="_self" class="{_nav_cls('manager')}">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
         <circle cx="9" cy="7" r="4"/>
         <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
         <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
       </svg>
+      L2 Manager
     </a>
-    <a href="?tab=reps" target="_self" class="{_nav_cls('reps')}" title="L2 Reps">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <a href="?tab=reps" target="_self" class="{_nav_cls('reps')}">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="10"/>
         <circle cx="12" cy="12" r="6"/>
         <circle cx="12" cy="12" r="2"/>
       </svg>
+      L2 Reps
     </a>
-    <a href="?tab=coaching" target="_self" class="{_nav_cls('coaching')}" title="Coaching">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <a href="?tab=coaching" target="_self" class="{_nav_cls('coaching')}">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
         <path d="M6 12v5c3 3 9 3 12 0v-5"/>
       </svg>
+      Coaching
     </a>
 """ if _coaching_mode else ""
 
 _admin_link = f"""
     <div class="cst-sep"></div>
-    <a href="?tab=admin" target="_self" class="{_nav_cls('admin')}" title="Admin">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <a href="?tab=admin" target="_self" class="{_nav_cls('admin')}">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
       </svg>
+      Admin
     </a>
 """ if _admin_mode else ""
 
 st.markdown(f"""
 <div class="cst-sidebar">
   <div class="cst-logo">
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
       <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
     </svg>
+    Escalation
   </div>
   <nav class="cst-nav">
-    <a href="?tab=results" target="_self" class="{_nav_cls('results')}" title="Results">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <a href="?tab=results" target="_self" class="{_nav_cls('results')}">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/>
         <line x1="6" y1="20" x2="6" y2="14"/>
       </svg>
+      Results
     </a>
-    <a href="?tab=trends" target="_self" class="{_nav_cls('trends')}" title="Trends">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <a href="?tab=trends" target="_self" class="{_nav_cls('trends')}">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
         <polyline points="17 6 23 6 23 12"/>
       </svg>
+      Trends
     </a>
     {_manager_links}
     {_admin_link}
