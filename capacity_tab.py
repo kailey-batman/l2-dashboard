@@ -1,16 +1,16 @@
 """
 Team Capacity view — live "overwhelm score" for the support team.
 
-Score = (open backlog + 2 × human-handled new + 0.5 × Fin-only new) ÷ reps available
+Score = (open backlog + 4 × human-handled new + 1 × Fin-only new) ÷ reps available
 
   open backlog      conversations created in the last 7 days that are still open (includes snoozed)
-  human-handled new conversations created in the last 3h, minus Fin-only ones
-  Fin-only new      created in the last 3h, Fin participated, no teammate reply yet
+  human-handled new conversations created in the last hour, minus Fin-only ones
+  Fin-only new      created in the last hour, Fin participated, no teammate reply yet
   reps available    roster reps not in Intercom away mode
 
 Calibrated Sep 2026 against 6 "very high capacity" alerts from the support team
-(Apr to Sep 2026) and 11 same-weekday baselines. Red (40+) caught 4 of 6 alerts
-with 0 false positives. Yellow (30 to 40) is a watch zone.
+(Apr to Sep 2026) and 11 same-weekday baselines. Red (40+) caught 5 of 6 alerts
+with 1 false positive. Yellow (30 to 40) is a watch zone.
 
 Requires INTERCOM_ACCESS_TOKEN on the Railway environment (read conversations + read admins).
 """
@@ -38,9 +38,9 @@ DEFAULT_REPS = [
 ]
 
 BACKLOG_WINDOW = 7 * 24 * 3600
-NEW_WINDOW = 3 * 3600
-HUMAN_WEIGHT = 2.0
-FIN_WEIGHT = 0.5  # a quarter of a human-handled conversation
+NEW_WINDOW = 3600
+HUMAN_WEIGHT = 4.0
+FIN_WEIGHT = 1.0  # a quarter of a human-handled conversation
 RED_AT = 40
 YELLOW_AT = 30
 
@@ -48,12 +48,12 @@ BAND_COLORS = {"red": "#ff5252", "yellow": "#FFD740", "green": "#00E676"}
 
 # Historical calibration points (score at the moment the team flagged high capacity).
 CALIBRATION = [
-    ("Tue Apr 7, 2:58 PM", 26, 15, 3, 1, 57.5),
-    ("Fri Jun 26, 12:27 PM", 38, 17, 5, 4, 18.6),
-    ("Thu Aug 13, 12:31 PM", 40, 13, 1, 1, 66.5),
-    ("Mon Aug 17, 5:09 PM", 41, 18, 5, 1, 79.5),
-    ("Fri Sep 25, 3:39 PM", 31, 20, 6, 2, 37.0),
-    ("Mon Sep 28, 4:04 PM", 38, 22, 3, 1, 83.5),
+    ("Tue Apr 7, 2:58 PM", 26, 9, 0, 1, 62.0),
+    ("Fri Jun 26, 12:27 PM", 38, 9, 1, 4, 18.8),
+    ("Thu Aug 13, 12:31 PM", 40, 5, 1, 1, 61.0),
+    ("Mon Aug 17, 5:09 PM", 41, 7, 0, 1, 69.0),
+    ("Fri Sep 25, 3:39 PM", 31, 12, 2, 2, 40.5),
+    ("Mon Sep 28, 4:04 PM", 38, 9, 0, 1, 74.0),
 ]
 
 
@@ -163,19 +163,19 @@ def _render_calibration():
 **Score = (open backlog + {HUMAN_WEIGHT:g} × human-handled new + {FIN_WEIGHT:g} × Fin-only new) ÷ reps available**
 
 - **Open backlog:** conversations created in the last 7 days that are still open, including snoozed.
-- **Human-handled new:** conversations created in the last 3 hours, excluding Fin-only ones.
-- **Fin-only new:** created in the last 3 hours, Fin participated, and no teammate has replied yet. Weighted at a quarter of a human-handled conversation.
+- **Human-handled new:** conversations created in the last hour, excluding Fin-only ones.
+- **Fin-only new:** created in the last hour, Fin participated, and no teammate has replied yet. Weighted at a quarter of a human-handled conversation.
 - **Reps available:** roster reps not in Intercom away mode.
 
 **Bands:** red at {RED_AT}+, yellow {YELLOW_AT} to {RED_AT}, green under {YELLOW_AT}.
 
 Calibrated against the six times the team flagged very high capacity (Apr to Sep 2026) and 11 normal moments at the same weekday and time.
-Red caught 4 of 6 alerts with no false positives. Normal moments scored 10 to 37.
+Red caught 5 of 6 alerts. One normal moment (Mon Aug 10, one rep available) scored 42; the rest scored 7 to 34.
 Sudden spikes with several reps online (like Jun 26) can still score low.
 """
         )
         rows = [
-            {"Alert": a, "Backlog": b, "Human new (3h)": h, "Fin-only new (3h)": f, "Reps available": r, "Score": s}
+            {"Alert": a, "Backlog": b, "Human new (1h)": h, "Fin-only new (1h)": f, "Reps available": r, "Score": s}
             for a, b, h, f, r, s in CALIBRATION
         ]
         st.dataframe(rows, hide_index=True, width="stretch")
@@ -225,8 +225,8 @@ def render():
 
     c1, c2, c3, c4 = st.columns(4)
     c1.markdown(_card("Open backlog", snap["backlog"], "created in last 7 days"), unsafe_allow_html=True)
-    c2.markdown(_card("Human-handled new", snap["human_new"], "last 3 hours"), unsafe_allow_html=True)
-    c3.markdown(_card("Fin-only new", snap["fin_new"], "last 3 hours"), unsafe_allow_html=True)
+    c2.markdown(_card("Human-handled new", snap["human_new"], "last hour"), unsafe_allow_html=True)
+    c3.markdown(_card("Fin-only new", snap["fin_new"], "last hour"), unsafe_allow_html=True)
     c4.markdown(
         _card("Reps available", f"{n_avail} of {len(roster)}", ", ".join(snap["available"]) or "none"),
         unsafe_allow_html=True,
