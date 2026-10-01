@@ -134,12 +134,25 @@ def fetch_snapshot(token, roster):
         else:
             available.append(name)
 
+    # Current load for each available rep: conversations assigned to them right now.
+    rep_load = {}
+    for name in available:
+        aid = admins[name].get("id")
+        rep_load[name] = {
+            state: _count(token, [
+                {"field": "admin_assignee_id", "operator": "=", "value": aid},
+                {"field": "state", "operator": "=", "value": state},
+            ])
+            for state in ("open", "snoozed")
+        }
+
     return {
         "fetched_at": now,
         "backlog": backlog,
         "human_new": human_new,
         "fin_new": fin_only,
         "available": available,
+        "rep_load": rep_load,
         "away": away,
         "missing": missing,
     }
@@ -232,6 +245,15 @@ def render():
         unsafe_allow_html=True,
     )
 
+    if snap["available"]:
+        load = snap.get("rep_load", {})
+        st.caption(
+            "Available mode: "
+            + ", ".join(
+                f"{n} ({load[n]['open']} open, {load[n]['snoozed']} snoozed)" if n in load else n
+                for n in snap["available"]
+            )
+        )
     if snap["away"]:
         st.caption("In away mode: " + ", ".join(snap["away"]))
     if snap["missing"]:
