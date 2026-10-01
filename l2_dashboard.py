@@ -26,6 +26,7 @@ from streamlit_autorefresh import st_autorefresh
 
 import coaching_tab
 import l2_coaching_tab
+import capacity_tab
 
 # ── L2 Supported Capabilities ──────────────────────────────────────────────
 L2_CAPABILITIES = """
@@ -1428,7 +1429,7 @@ _active_tab = st.query_params.get("tab", "results")
 _valid_tabs = {"results", "trends", "reps"}
 # Manager tabs: coaching leads only
 if _coaching_mode:
-    _valid_tabs.update({"manager", "coaching"})
+    _valid_tabs.update({"manager", "coaching", "capacity"})
 # Admin tab: admins only
 if _admin_mode:
     _valid_tabs.add("admin")
@@ -1490,6 +1491,12 @@ if _coaching_mode:
         f'<svg {_ICO}><path d="M22 10v6M2 10l10-5 10 5-10 5z"/>'
         '<path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>'
         'L1 Coaching</a>'
+    )
+    _sb.append(
+        f'<a href="?tab=capacity" target="_self" class="{_nav_cls("capacity")}">'
+        f'<svg {_ICO}><path d="M12 14l4-4"/>'
+        '<path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>'
+        'Team Capacity</a>'
     )
 
 # ── Admin item ──────────────────────────────────────────────────────────────
@@ -2766,6 +2773,13 @@ if _active_tab == "reps":
 # ═══════════════════════════════════════════════════════════════════════════
 if _coaching_mode and _active_tab == "coaching":
     coaching_tab.render()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PAGE — TEAM CAPACITY (coaching leads only)
+# ═══════════════════════════════════════════════════════════════════════════
+if _coaching_mode and _active_tab == "capacity":
+    capacity_tab.render()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
