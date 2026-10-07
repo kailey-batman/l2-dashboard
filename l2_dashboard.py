@@ -716,7 +716,7 @@ def run_analysis_background(rows, existing_results, rerun_all):
 import streamlit.components.v1 as _stc
 
 _AUTH_COOKIE = "fg_l2_auth"
-_COOKIE_TTL_HOURS = 24
+_COOKIE_TTL_HOURS = 24 * 30
 
 
 def _set_auth_cookie(user_info):
