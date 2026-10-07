@@ -240,7 +240,7 @@ def _away_mode_events(token, since):
     events = {}
     url = f"{INTERCOM_API}/admins/activity_logs"
     params = {"created_at_after": since}
-    for _ in range(20):
+    for _ in range(5):
         r = requests.get(url, headers=_headers(token), params=params, timeout=30)
         r.raise_for_status()
         data = r.json()
@@ -317,54 +317,62 @@ def fetch_rep_stats(token, roster):
         except requests.RequestException:
             return None  # shows as n/a; the rest of the table still loads
 
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        f_today = pool.submit(_search_all, token, [{"field": "created_at", "operator": ">", "value": midnight}])
-        f_closed = pool.submit(_search_all, token, [{"field": "statistics.last_close_at", "operator": ">", "value": midnight}])
-        f_rated = pool.submit(optional, _search_all, token,
-                              [{"field": "conversation_rating.replied_at", "operator": ">", "value": now - CSAT_WINDOW}])
-        f_events = pool.submit(optional, _away_mode_events, token, midnight)
-        f_open = {name: pool.submit(open_convs, a["id"]) for name, a in reps}
-        f_snoozed = {name: pool.submit(snoozed, a["id"]) for name, a in reps}
-        today, closed, rated, events = f_today.result(), f_closed.result(), f_rated.result(), f_events.result()
-        open_by_rep = {n: f.result() for n, f in f_open.items()}
-        snoozed_by_rep = {n: f.result() for n, f in f_snoozed.items()}
+    online_reps = [(name, a) for name, a in reps if not a.get("away_mode_enabled")]
+    window_start = hours_start if now >= hours_start else midnight
+
+    def assigned(aid, *conds):
+        return [{"field": "admin_assignee_id", "operator": "=", "value": aid}, *conds]
+
+    # Only online reps get queried, and every query is scoped to that rep.
+    jobs = {}
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        for name, a in online_reps:
+            aid = a["id"]
+            jobs[name] = {
+                "open": pool.submit(_search_all, token, assigned(aid, {"field": "state", "operator": "=", "value": "open"}), 2),
+                "snoozed": pool.submit(_count, token, assigned(aid, {"field": "state", "operator": "=", "value": "snoozed"})),
+                "today": pool.submit(_search_all, token, assigned(aid, {"field": "created_at", "operator": ">", "value": midnight}), 2),
+                "closed": pool.submit(_search_all, token, assigned(aid, {"field": "statistics.last_close_at", "operator": ">", "value": midnight}), 2),
+                "rated": pool.submit(optional, _search_all, token,
+                                     assigned(aid, {"field": "conversation_rating.replied_at", "operator": ">", "value": now - CSAT_WINDOW}), 2),
+            }
+        f_events = pool.submit(optional, _away_mode_events, token, window_start) if online_reps else None
+        results = {name: {k: f.result() for k, f in fs.items()} for name, fs in jobs.items()}
+        events = f_events.result() if f_events else {}
 
     rows = []
     for name, a in reps:
+        if name not in results:
+            rows.append({"name": name, "online": False})
+            continue
         aid = str(a["id"])
-        online_now = not a.get("away_mode_enabled")
-        mine = [c for c in today if str(c.get("admin_assignee_id")) == aid]
+        res = results[name]
+        mine = res["today"]
         frts = [
             (c.get("statistics") or {}).get("time_to_admin_reply")
             for c in mine
             if (c.get("statistics") or {}).get("time_to_admin_reply") is not None
         ]
-        waits = [now - c["waiting_since"] for c in open_by_rep[name] if c.get("waiting_since")]
+        waits = [now - c["waiting_since"] for c in res["open"] if c.get("waiting_since")]
         closed_today = sum(
-            1 for c in closed
+            1 for c in res["closed"]
             if str((c.get("statistics") or {}).get("last_closed_by_id")) == aid
-            and ((c.get("statistics") or {}).get("last_close_at") or 0) >= midnight
         )
         csat = None
-        if rated is not None:
-            scores = [
-                (c.get("conversation_rating") or {}).get("rating")
-                for c in rated
-                if str(((c.get("conversation_rating") or {}).get("teammate") or {}).get("id") or c.get("admin_assignee_id")) == aid
-            ]
+        if res["rated"] is not None:
+            scores = [(c.get("conversation_rating") or {}).get("rating") for c in res["rated"]]
             scores = [s for s in scores if s is not None]
             csat = (round(100 * sum(1 for s in scores if s >= 4) / len(scores)), len(scores)) if scores else (None, 0)
         if events is None:
             online_since, online_secs = None, None
         else:
-            start = max(hours_start, midnight) if now >= hours_start else midnight
-            online_since, online_secs = _online_time(events.get(aid, []), online_now, start, now)
+            online_since, online_secs = _online_time(events.get(aid, []), True, window_start, now)
         hours = None if online_secs is None else online_secs / 3600
         rows.append({
             "name": name,
-            "online": online_now,
-            "open": len(open_by_rep[name]),
-            "snoozed": snoozed_by_rep[name],
+            "online": True,
+            "open": len(res["open"]),
+            "snoozed": res["snoozed"],
             "longest_wait": max(waits) if waits else None,
             "frt": _median(frts),
             "new_15m": sum(1 for c in mine if c["created_at"] > now - 900),
@@ -404,6 +412,14 @@ def _render_rep_table(stats):
     for r in stats["rows"]:
         dot = "🟢" if r["online"] else "🔴"
         name_color = "#E0E0E0" if r["online"] else "#9E9E9E"
+        if not r["online"]:
+            body.append(
+                f'<tr><td style="text-align:left;padding:14px 12px;font-size:22px;border-bottom:1px solid #373E47;'
+                f'white-space:nowrap;">{dot} <span style="color:{name_color};font-weight:700;">{html.escape(r["name"])}</span></td>'
+                f'<td colspan="{len(cols) - 1}" style="padding:14px 12px;font-size:16px;color:#9E9E9E;'
+                f'border-bottom:1px solid #373E47;">Away</td></tr>'
+            )
+            continue
         since = (
             datetime.fromtimestamp(r["online_since"], ET).strftime("%-I:%M %p") if r["online_since"]
             else ("n/a" if r["hours"] is None else "Away")
@@ -439,7 +455,7 @@ def _render_rep_table(stats):
         unsafe_allow_html=True,
     )
     notes = [
-        "Counts are conversations currently assigned to each rep. First response is today's median.",
+        "Stats load for online reps only. Counts are conversations currently assigned to each rep. First response is today's median.",
         f"Longest wait is the open conversation waiting longest on a reply (yellow 30 min, red 1 hour).",
         f"Hours online count from {HOURS_START} AM ET or the first away mode change today. Per hour is today's tickets ÷ hours online.",
         "CSAT is the share of 4 and 5 star ratings over the last 30 days, with the number of ratings.",
