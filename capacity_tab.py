@@ -389,6 +389,36 @@ def fetch_rep_stats(token, roster):
     return {"fetched_at": now, "rows": rows, "missing": missing, "activity_log": events is not None}
 
 
+@st.cache_resource
+def _day_memory():
+    """Last stats seen for each rep today, kept in server memory across page loads."""
+    return {"date": None, "rows": {}}
+
+
+def _with_day_stats(stats):
+    """Keep showing today's stats for reps who have gone offline, without fetching for them.
+
+    Online reps' fresh rows are saved. A rep who was online earlier today and is now away
+    gets their last saved row back, marked as left. Resets at midnight ET and whenever the
+    dashboard restarts (a Railway deploy clears server memory).
+    """
+    mem = _day_memory()
+    today = datetime.fromtimestamp(stats["fetched_at"], ET).date().isoformat()
+    if mem["date"] != today:
+        mem["date"], mem["rows"] = today, {}
+    rows = []
+    for r in stats["rows"]:
+        if r["online"]:
+            mem["rows"][r["name"]] = {**r, "last_seen": stats["fetched_at"]}
+            rows.append(r)
+        elif r["name"] in mem["rows"]:
+            rows.append({**mem["rows"][r["name"]], "online": False, "left": True})
+        else:
+            rows.append(r)
+    rows.sort(key=lambda r: (not r["online"], not r.get("left"), r["name"]))
+    return {**stats, "rows": rows}
+
+
 def _mins(seconds):
     if seconds is None:
         return "n/a"
@@ -412,7 +442,7 @@ def _render_rep_table(stats):
     for r in stats["rows"]:
         dot = "🟢" if r["online"] else "🔴"
         name_color = "#E0E0E0" if r["online"] else "#9E9E9E"
-        if not r["online"]:
+        if not r["online"] and not r.get("left"):
             body.append(
                 f'<tr><td style="text-align:left;padding:14px 12px;font-size:22px;border-bottom:1px solid #373E47;'
                 f'white-space:nowrap;">{dot} <span style="color:{name_color};font-weight:700;">{html.escape(r["name"])}</span></td>'
@@ -420,10 +450,14 @@ def _render_rep_table(stats):
                 f'border-bottom:1px solid #373E47;">Away</td></tr>'
             )
             continue
-        since = (
-            datetime.fromtimestamp(r["online_since"], ET).strftime("%-I:%M %p") if r["online_since"]
-            else ("n/a" if r["hours"] is None else "Away")
-        )
+        left = r.get("left")
+        if left:
+            since = f'Left ~{datetime.fromtimestamp(r["last_seen"], ET).strftime("%-I:%M %p")}'
+        else:
+            since = (
+                datetime.fromtimestamp(r["online_since"], ET).strftime("%-I:%M %p") if r["online_since"]
+                else ("n/a" if r["hours"] is None else "Away")
+            )
         if r["csat"] is None:
             csat = "n/a"
         elif r["csat"][0] is None:
@@ -431,19 +465,27 @@ def _render_rep_table(stats):
         else:
             csat = f'{r["csat"][0]}% <span style="color:#9E9E9E;font-size:14px;">({r["csat"][1]})</span>'
         wait_color = "#ff5252" if (r["longest_wait"] or 0) >= 3600 else ("#FFD740" if (r["longest_wait"] or 0) >= 1800 else "inherit")
+        # Live columns (current queue, last 15m and 1h) go blank once a rep leaves.
         cells = [
             f'{dot} <span style="color:{name_color};font-weight:700;">{html.escape(r["name"])}</span>',
-            r["open"], r["snoozed"],
-            f'<span style="color:{wait_color};">{_mins(r["longest_wait"])}</span>' if r["longest_wait"] else "None",
-            _mins(r["frt"]), r["new_15m"], r["new_1h"], r["today"], r["closed"],
+            "" if left else r["open"],
+            "" if left else r["snoozed"],
+            "" if left else (
+                f'<span style="color:{wait_color};">{_mins(r["longest_wait"])}</span>' if r["longest_wait"] else "None"
+            ),
+            _mins(r["frt"]),
+            "" if left else r["new_15m"],
+            "" if left else r["new_1h"],
+            r["today"], r["closed"],
             since,
             "n/a" if r["hours"] is None else f'{r["hours"]:.1f}',
             "n/a" if r["per_hour"] is None else f'{r["per_hour"]:.1f}',
             csat,
         ]
+        text_color = "#9E9E9E" if left else "inherit"
         tds = "".join(
             f'<td style="text-align:{align};padding:14px 12px;font-size:22px;border-bottom:1px solid #373E47;'
-            f'white-space:nowrap;">{cell}</td>'
+            f'white-space:nowrap;color:{text_color};">{cell}</td>'
             for cell, (_, align) in zip(cells, cols)
         )
         body.append(f"<tr>{tds}</tr>")
@@ -455,7 +497,7 @@ def _render_rep_table(stats):
         unsafe_allow_html=True,
     )
     notes = [
-        "Stats load for online reps only. Counts are conversations currently assigned to each rep. First response is today's median.",
+        "Stats load for online reps only. Reps who were online earlier today keep their stats from when they left, without reloading. Counts are conversations currently assigned to each rep. First response is today's median.",
         f"Longest wait is the open conversation waiting longest on a reply (yellow 30 min, red 1 hour).",
         f"Hours online count from {HOURS_START} AM ET or the first away mode change today. Per hour is today's tickets ÷ hours online.",
         "CSAT is the share of 4 and 5 star ratings over the last 30 days, with the number of ratings.",
@@ -548,7 +590,7 @@ def render():
 
     st.markdown("### Reps")
     try:
-        _render_rep_table(fetch_rep_stats(token, roster))
+        _render_rep_table(_with_day_stats(fetch_rep_stats(token, roster)))
     except requests.RequestException as e:
         st.error(f"Could not load rep stats: {e}")
 
