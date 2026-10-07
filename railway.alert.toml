@@ -1,0 +1,11 @@
+# Config for the "Capacity Alert" cron service (separate service, same repo).
+# In Railway, point that service's config file path at railway.alert.toml.
+# Cron runs in UTC. 12:00 to 23:30 UTC covers 8am to 6pm ET in both EDT and EST;
+# capacity_alert.py skips anything outside 8am to 6pm ET itself.
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python capacity_alert.py"
+cronSchedule = "0,30 12-23 * * 1-5"
+restartPolicyType = "NEVER"

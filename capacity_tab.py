@@ -1,22 +1,26 @@
 """
 Team Capacity view — live "overwhelm score" for the support team.
 
-Score = (open backlog + 4 × human-handled new + 1 × Fin-only new) ÷ reps available
+Score = (4 × recent inflow + 2 × open queue + 0.1 × open backlog) ÷ reps available
 
+  recent inflow     new conversations per hour, blended across the last 15 minutes, 1 hour,
+                    2 hours, and 4 hours (40/30/20/10 weights, most recent heaviest).
+                    Fin-only conversations count as a quarter. Auto-generated emails and spam
+                    (closed with no teammate reply and no Fin) don't count.
+  open queue        conversations assigned to available reps that are open right now (not snoozed)
   open backlog      conversations created in the last 7 days that are still open (includes snoozed)
-  human-handled new conversations created in the last hour, minus Fin-only ones
-  Fin-only new      created in the last hour, Fin participated, no teammate reply yet
   reps available    roster reps not in Intercom away mode
 
-Calibrated Sep 2026 against 6 "very high capacity" alerts from the support team
-(Apr to Sep 2026) and 11 same-weekday baselines. Red (40+) caught 5 of 6 alerts
-with 1 false positive. Yellow (30 to 40) is a watch zone.
+Oct 2026: reweighted so recent volume and what reps actually have open drive the score,
+not the 7 day backlog. The Sep 2026 calibration (backlog driven) no longer applies, so the
+red and yellow thresholds need re-checking against the new formula.
 
 Requires INTERCOM_ACCESS_TOKEN on the Railway environment (read conversations + read admins).
 """
 
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -38,9 +42,18 @@ DEFAULT_REPS = [
 ]
 
 BACKLOG_WINDOW = 7 * 24 * 3600
-NEW_WINDOW = 3600
-HUMAN_WEIGHT = 4.0
-FIN_WEIGHT = 1.0  # a quarter of a human-handled conversation
+NEW_WINDOW = 3600  # window for the "new in the last hour" cards and the alert summary
+# (window in seconds, label, weight). Weights sum to 1, most recent heaviest.
+INFLOW_WINDOWS = [
+    (15 * 60, "15m", 0.4),
+    (3600, "1h", 0.3),
+    (2 * 3600, "2h", 0.2),
+    (4 * 3600, "4h", 0.1),
+]
+FIN_FRACTION = 0.25  # a Fin-only conversation counts as a quarter of a human-handled one
+INFLOW_WEIGHT = 4.0
+QUEUE_WEIGHT = 2.0
+BACKLOG_WEIGHT = 0.1
 RED_AT = 40
 YELLOW_AT = 30
 
@@ -63,11 +76,26 @@ def _roster():
     return names or DEFAULT_REPS
 
 
-def compute_score(backlog, human_new, fin_new, available):
+def inflow_rate(inflow):
+    """Blended new conversations per hour. inflow maps window label to (human, fin_only) counts."""
+    rate = 0.0
+    for seconds, label, weight in INFLOW_WINDOWS:
+        human, fin = inflow[label]
+        rate += weight * (human + FIN_FRACTION * fin) * 3600 / seconds
+    return rate
+
+
+def compute_score(snap):
     """Return (score, band). Score is None when no reps are available."""
+    available = len(snap["available"])
     if available <= 0:
         return None, "red"
-    score = (backlog + HUMAN_WEIGHT * human_new + FIN_WEIGHT * fin_new) / available
+    queue = sum(load["open"] for load in snap["rep_load"].values())
+    score = (
+        INFLOW_WEIGHT * inflow_rate(snap["inflow"])
+        + QUEUE_WEIGHT * queue
+        + BACKLOG_WEIGHT * snap["backlog"]
+    ) / available
     if score >= RED_AT:
         band = "red"
     elif score >= YELLOW_AT:
@@ -96,30 +124,50 @@ def _count(token, conditions):
     return int(r.json().get("total_count", 0))
 
 
+def _new_counts(token, since):
+    """(human-handled, Fin-only) conversations created after `since`.
+
+    Auto-generated emails and spam don't count. Those get closed with no teammate reply and
+    no Fin involvement, so anything matching that is dropped before splitting human vs. Fin.
+    """
+    created = {"field": "created_at", "operator": ">", "value": since}
+    fin = {"field": "ai_agent_participated", "operator": "=", "value": True}
+    no_fin = {"field": "ai_agent_participated", "operator": "=", "value": False}
+    closed = {"field": "state", "operator": "=", "value": "closed"}
+    replied = {"field": "statistics.first_admin_reply_at", "operator": ">", "value": 0}
+    queries = {
+        "total": [created],
+        "fin": [created, fin],
+        "fin_replied": [created, fin, replied],
+        "closed_no_fin": [created, no_fin, closed],
+        "closed_no_fin_replied": [created, no_fin, closed, replied],
+    }
+    with ThreadPoolExecutor(max_workers=len(queries)) as pool:
+        futures = {k: pool.submit(_count, token, q) for k, q in queries.items()}
+        n = {k: f.result() for k, f in futures.items()}
+    fin_only = max(n["fin"] - n["fin_replied"], 0)
+    junk = max(n["closed_no_fin"] - n["closed_no_fin_replied"], 0)
+    return max(n["total"] - fin_only - junk, 0), fin_only
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_snapshot(token, roster):
+    return snapshot(token, roster)
+
+
+def snapshot(token, roster):
+    """Live Intercom numbers behind the score. Uncached so capacity_alert.py can reuse it."""
     now = int(time.time())
     since_backlog = now - BACKLOG_WINDOW
-    since_new = now - NEW_WINDOW
 
     backlog = _count(token, [
         {"field": "created_at", "operator": ">", "value": since_backlog},
         {"field": "open", "operator": "=", "value": True},
     ])
-    new_total = _count(token, [
-        {"field": "created_at", "operator": ">", "value": since_new},
-    ])
-    fin_participated = _count(token, [
-        {"field": "created_at", "operator": ">", "value": since_new},
-        {"field": "ai_agent_participated", "operator": "=", "value": True},
-    ])
-    fin_with_human = _count(token, [
-        {"field": "created_at", "operator": ">", "value": since_new},
-        {"field": "ai_agent_participated", "operator": "=", "value": True},
-        {"field": "statistics.first_admin_reply_at", "operator": ">", "value": 0},
-    ])
-    fin_only = max(fin_participated - fin_with_human, 0)
-    human_new = max(new_total - fin_only, 0)
+    with ThreadPoolExecutor(max_workers=len(INFLOW_WINDOWS)) as pool:
+        futures = {label: pool.submit(_new_counts, token, now - seconds) for seconds, label, _ in INFLOW_WINDOWS}
+        inflow = {label: f.result() for label, f in futures.items()}
+    human_new, fin_only = inflow["1h"]
 
     r = requests.get(f"{INTERCOM_API}/admins", headers=_headers(token), timeout=20)
     r.raise_for_status()
@@ -151,6 +199,7 @@ def fetch_snapshot(token, roster):
         "backlog": backlog,
         "human_new": human_new,
         "fin_new": fin_only,
+        "inflow": inflow,
         "available": available,
         "rep_load": rep_load,
         "away": away,
@@ -173,18 +222,18 @@ def _render_calibration():
     with st.expander("How the score works"):
         st.markdown(
             f"""
-**Score = (open backlog + {HUMAN_WEIGHT:g} × human-handled new + {FIN_WEIGHT:g} × Fin-only new) ÷ reps available**
+**Score = ({INFLOW_WEIGHT:g} × recent inflow + {QUEUE_WEIGHT:g} × open queue + {BACKLOG_WEIGHT:g} × open backlog) ÷ reps available**
 
-- **Open backlog:** conversations created in the last 7 days that are still open, including snoozed.
-- **Human-handled new:** conversations created in the last hour, excluding Fin-only ones.
-- **Fin-only new:** created in the last hour, Fin participated, and no teammate has replied yet. Weighted at a quarter of a human-handled conversation.
+- **Recent inflow:** new conversations per hour, blended across the last 15 minutes (40%), 1 hour (30%), 2 hours (20%), and 4 hours (10%). Fin-only conversations count as a quarter. Auto-generated emails and spam (closed with no teammate reply and no Fin) don't count.
+- **Open queue:** conversations assigned to available reps that are open right now. Snoozed ones don't count.
+- **Open backlog:** conversations created in the last 7 days that are still open, including snoozed. Lightly weighted.
 - **Reps available:** roster reps not in Intercom away mode.
 
 **Bands:** red at {RED_AT}+, yellow {YELLOW_AT} to {RED_AT}, green under {YELLOW_AT}.
 
-Calibrated against the six times the team flagged very high capacity (Apr to Sep 2026) and 11 normal moments at the same weekday and time.
-Red caught 5 of 6 alerts. One normal moment (Mon Aug 10, one rep available) scored 42; the rest scored 7 to 34.
-Sudden spikes with several reps online (like Jun 26) can still score low.
+Reweighted Oct 2026 so recent volume and open work drive the score instead of the 7 day backlog.
+The thresholds still come from the Sep 2026 calibration of the old formula and need re-checking.
+The table below shows the old formula's scores at the six times the team flagged very high capacity.
 """
         )
         rows = [
@@ -221,7 +270,9 @@ def render():
         return
 
     n_avail = len(snap["available"])
-    score, band = compute_score(snap["backlog"], snap["human_new"], snap["fin_new"], n_avail)
+    score, band = compute_score(snap)
+    queue = sum(load["open"] for load in snap["rep_load"].values())
+    inflow = snap["inflow"]
     color = BAND_COLORS[band]
     label = {"red": "Overwhelmed", "yellow": "Watch", "green": "OK"}[band]
     score_txt = "No reps available" if score is None else f"{score:g}"
@@ -237,9 +288,16 @@ def render():
     )
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.markdown(_card("Open backlog", snap["backlog"], "created in last 7 days"), unsafe_allow_html=True)
-    c2.markdown(_card("Human-handled new", snap["human_new"], "last hour"), unsafe_allow_html=True)
-    c3.markdown(_card("Fin-only new", snap["fin_new"], "last hour"), unsafe_allow_html=True)
+    c1.markdown(
+        _card(
+            "New per hour",
+            f"{inflow_rate(inflow):.1f}",
+            "Human-handled  " + "  ·  ".join(f"{label}: {inflow[label][0]}" for _, label, _ in INFLOW_WINDOWS),
+        ),
+        unsafe_allow_html=True,
+    )
+    c2.markdown(_card("Open queue", queue, "open now, snoozed excluded"), unsafe_allow_html=True)
+    c3.markdown(_card("Open backlog", snap["backlog"], "last 7 days, lightly weighted"), unsafe_allow_html=True)
     c4.markdown(
         _card("Reps available", f"{n_avail} of {len(roster)}", ", ".join(snap["available"]) or "none"),
         unsafe_allow_html=True,
