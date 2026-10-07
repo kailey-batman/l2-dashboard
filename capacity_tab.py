@@ -317,16 +317,25 @@ def fetch_rep_stats(token, roster):
         except requests.RequestException:
             return None  # shows as n/a; the rest of the table still loads
 
-    online_reps = [(name, a) for name, a in reps if not a.get("away_mode_enabled")]
     window_start = hours_start if now >= hours_start else midnight
 
     def assigned(aid, *conds):
         return [{"field": "admin_assignee_id", "operator": "=", "value": aid}, *conds]
 
-    # Only online reps get queried, and every query is scoped to that rep.
+    # Full stats for anyone online, plus away reps who were assigned a ticket today
+    # (auto-routing assigns to reps whether or not they're online). One quick count per away rep decides.
+    online_reps = [(name, a) for name, a in reps if not a.get("away_mode_enabled")]
+    away_reps = [(name, a) for name, a in reps if a.get("away_mode_enabled")]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        away_today = {
+            name: pool.submit(_count, token, assigned(a["id"], {"field": "created_at", "operator": ">", "value": midnight}))
+            for name, a in away_reps
+        }
+        detailed = online_reps + [(name, a) for name, a in away_reps if away_today[name].result() > 0]
+
     jobs = {}
     with ThreadPoolExecutor(max_workers=16) as pool:
-        for name, a in online_reps:
+        for name, a in detailed:
             aid = a["id"]
             jobs[name] = {
                 "open": pool.submit(_search_all, token, assigned(aid, {"field": "state", "operator": "=", "value": "open"}), 2),
@@ -336,7 +345,7 @@ def fetch_rep_stats(token, roster):
                 "rated": pool.submit(optional, _search_all, token,
                                      assigned(aid, {"field": "conversation_rating.replied_at", "operator": ">", "value": now - CSAT_WINDOW}), 2),
             }
-        f_events = pool.submit(optional, _away_mode_events, token, window_start) if online_reps else None
+        f_events = pool.submit(optional, _away_mode_events, token, window_start) if detailed else None
         results = {name: {k: f.result() for k, f in fs.items()} for name, fs in jobs.items()}
         events = f_events.result() if f_events else {}
 
@@ -346,6 +355,7 @@ def fetch_rep_stats(token, roster):
             rows.append({"name": name, "online": False})
             continue
         aid = str(a["id"])
+        online_now = not a.get("away_mode_enabled")
         res = results[name]
         mine = res["today"]
         frts = [
@@ -366,11 +376,12 @@ def fetch_rep_stats(token, roster):
         if events is None:
             online_since, online_secs = None, None
         else:
-            online_since, online_secs = _online_time(events.get(aid, []), True, window_start, now)
+            online_since, online_secs = _online_time(events.get(aid, []), online_now, window_start, now)
         hours = None if online_secs is None else online_secs / 3600
         rows.append({
             "name": name,
-            "online": True,
+            "online": online_now,
+            "details": True,
             "open": len(res["open"]),
             "snoozed": res["snoozed"],
             "longest_wait": max(waits) if waits else None,
@@ -384,7 +395,7 @@ def fetch_rep_stats(token, roster):
             "per_hour": (len(mine) / hours) if hours and hours >= 0.25 else None,
             "csat": csat,
         })
-    rows.sort(key=lambda r: (not r["online"], r["name"]))
+    rows.sort(key=lambda r: (not r["online"], not r.get("details"), r["name"]))
     missing = [n for n in roster if n not in admins]
     return {"fetched_at": now, "rows": rows, "missing": missing, "activity_log": events is not None}
 
@@ -408,14 +419,15 @@ def _with_day_stats(stats):
         mem["date"], mem["rows"] = today, {}
     rows = []
     for r in stats["rows"]:
-        if r["online"]:
-            mem["rows"][r["name"]] = {**r, "last_seen": stats["fetched_at"]}
+        if r.get("details"):
+            if r["online"]:
+                mem["rows"][r["name"]] = {**r, "last_seen": stats["fetched_at"]}
             rows.append(r)
         elif r["name"] in mem["rows"]:
             rows.append({**mem["rows"][r["name"]], "online": False, "left": True})
         else:
             rows.append(r)
-    rows.sort(key=lambda r: (not r["online"], not r.get("left"), r["name"]))
+    rows.sort(key=lambda r: (not r["online"], not r.get("details"), not r.get("left"), r["name"]))
     return {**stats, "rows": rows}
 
 
@@ -442,7 +454,7 @@ def _render_rep_table(stats):
     for r in stats["rows"]:
         dot = "🟢" if r["online"] else "🔴"
         name_color = "#E0E0E0" if r["online"] else "#9E9E9E"
-        if not r["online"] and not r.get("left"):
+        if not r.get("details") and not r.get("left"):
             body.append(
                 f'<tr><td style="text-align:left;padding:14px 12px;font-size:22px;border-bottom:1px solid #373E47;'
                 f'white-space:nowrap;">{dot} <span style="color:{name_color};font-weight:700;">{html.escape(r["name"])}</span></td>'
@@ -497,7 +509,7 @@ def _render_rep_table(stats):
         unsafe_allow_html=True,
     )
     notes = [
-        "Stats load for online reps only. Reps who were online earlier today keep their stats from when they left, without reloading. Counts are conversations currently assigned to each rep. First response is today's median.",
+        "Stats load for reps who are online or were assigned a ticket today. Reps who were online earlier today keep their stats from when they left, without reloading. Counts are conversations currently assigned to each rep. First response is today's median.",
         f"Longest wait is the open conversation waiting longest on a reply (yellow 30 min, red 1 hour).",
         f"Hours online count from {HOURS_START} AM ET or the first away mode change today. Per hour is today's tickets ÷ hours online.",
         "CSAT is the share of 4 and 5 star ratings over the last 30 days, with the number of ratings.",
