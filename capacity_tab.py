@@ -18,6 +18,7 @@ red and yellow thresholds need re-checking against the new formula.
 Requires INTERCOM_ACCESS_TOKEN on the Railway environment (read conversations + read admins).
 """
 
+import html
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -207,6 +208,247 @@ def snapshot(token, roster):
     }
 
 
+# ---------------------------------------------------------------------------
+# Per-rep table. Page only (the alert job doesn't need it), cached separately.
+# ---------------------------------------------------------------------------
+
+ET = ZoneInfo("America/New_York")
+HOURS_START = 7  # hours online count from 7 AM ET unless away mode changed later than that
+CSAT_WINDOW = 30 * 24 * 3600
+
+
+def _search_all(token, conditions, max_pages=10):
+    """Every conversation matching `conditions` (150 per page, capped at max_pages)."""
+    out, cursor = [], None
+    for _ in range(max_pages):
+        pagination = {"per_page": 150}
+        if cursor:
+            pagination["starting_after"] = cursor
+        body = {"query": {"operator": "AND", "value": conditions}, "pagination": pagination}
+        r = requests.post(f"{INTERCOM_API}/conversations/search", headers=_headers(token), json=body, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        out.extend(data.get("conversations", []))
+        cursor = ((data.get("pages") or {}).get("next") or {}).get("starting_after")
+        if not cursor:
+            break
+    return out
+
+
+def _away_mode_events(token, since):
+    """{admin_id: [(created_at, away_mode), ...]} from the teammate activity log, oldest first."""
+    events = {}
+    url = f"{INTERCOM_API}/admins/activity_logs"
+    params = {"created_at_after": since}
+    for _ in range(20):
+        r = requests.get(url, headers=_headers(token), params=params, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        for log in data.get("activity_logs", []):
+            if log.get("activity_type") != "admin_away_mode_change":
+                continue
+            away = (log.get("metadata") or {}).get("away_mode")
+            aid = str((log.get("performed_by") or {}).get("id", ""))
+            if away is None or not aid:
+                continue
+            events.setdefault(aid, []).append((int(log["created_at"]), bool(away)))
+        nxt = (data.get("pages") or {}).get("next")
+        if not nxt:
+            break
+        url, params = (nxt, None) if isinstance(nxt, str) else (url, {**params, "starting_after": nxt.get("starting_after")})
+    for evs in events.values():
+        evs.sort()
+    return events
+
+
+def _online_time(events, online_now, start, now):
+    """(online_since, seconds online since `start`) from a rep's away mode events today."""
+    # The first change today flipped the state, so before it the rep was online exactly when
+    # that change turned away mode on. With no changes today, the current state held all day.
+    online = events[0][1] if events else online_now
+    t, total, since = start, 0, (start if online else None)
+    for ts, away in events:
+        ts = max(ts, start)
+        if online:
+            total += ts - t
+        online, t = (not away), ts
+        if online:
+            since = ts
+    if online:
+        total += now - t
+    return (since if online else None), total
+
+
+def _median(values):
+    values = sorted(values)
+    if not values:
+        return None
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_rep_stats(token, roster):
+    now = int(time.time())
+    now_et = datetime.fromtimestamp(now, ET)
+    midnight = int(now_et.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+    hours_start = int(now_et.replace(hour=HOURS_START, minute=0, second=0, microsecond=0).timestamp())
+
+    r = requests.get(f"{INTERCOM_API}/admins", headers=_headers(token), timeout=20)
+    r.raise_for_status()
+    admins = {a.get("name"): a for a in r.json().get("admins", [])}
+    reps = [(name, admins[name]) for name in roster if name in admins]
+
+    def open_convs(aid):
+        return _search_all(token, [
+            {"field": "admin_assignee_id", "operator": "=", "value": aid},
+            {"field": "state", "operator": "=", "value": "open"},
+        ], max_pages=2)
+
+    def snoozed(aid):
+        return _count(token, [
+            {"field": "admin_assignee_id", "operator": "=", "value": aid},
+            {"field": "state", "operator": "=", "value": "snoozed"},
+        ])
+
+    def optional(fn, *args):
+        try:
+            return fn(*args)
+        except requests.RequestException:
+            return None  # shows as n/a; the rest of the table still loads
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        f_today = pool.submit(_search_all, token, [{"field": "created_at", "operator": ">", "value": midnight}])
+        f_closed = pool.submit(_search_all, token, [{"field": "statistics.last_close_at", "operator": ">", "value": midnight}])
+        f_rated = pool.submit(optional, _search_all, token,
+                              [{"field": "conversation_rating.replied_at", "operator": ">", "value": now - CSAT_WINDOW}])
+        f_events = pool.submit(optional, _away_mode_events, token, midnight)
+        f_open = {name: pool.submit(open_convs, a["id"]) for name, a in reps}
+        f_snoozed = {name: pool.submit(snoozed, a["id"]) for name, a in reps}
+        today, closed, rated, events = f_today.result(), f_closed.result(), f_rated.result(), f_events.result()
+        open_by_rep = {n: f.result() for n, f in f_open.items()}
+        snoozed_by_rep = {n: f.result() for n, f in f_snoozed.items()}
+
+    rows = []
+    for name, a in reps:
+        aid = str(a["id"])
+        online_now = not a.get("away_mode_enabled")
+        mine = [c for c in today if str(c.get("admin_assignee_id")) == aid]
+        frts = [
+            (c.get("statistics") or {}).get("time_to_admin_reply")
+            for c in mine
+            if (c.get("statistics") or {}).get("time_to_admin_reply") is not None
+        ]
+        waits = [now - c["waiting_since"] for c in open_by_rep[name] if c.get("waiting_since")]
+        closed_today = sum(
+            1 for c in closed
+            if str((c.get("statistics") or {}).get("last_closed_by_id")) == aid
+            and ((c.get("statistics") or {}).get("last_close_at") or 0) >= midnight
+        )
+        csat = None
+        if rated is not None:
+            scores = [
+                (c.get("conversation_rating") or {}).get("rating")
+                for c in rated
+                if str(((c.get("conversation_rating") or {}).get("teammate") or {}).get("id") or c.get("admin_assignee_id")) == aid
+            ]
+            scores = [s for s in scores if s is not None]
+            csat = (round(100 * sum(1 for s in scores if s >= 4) / len(scores)), len(scores)) if scores else (None, 0)
+        if events is None:
+            online_since, online_secs = None, None
+        else:
+            start = max(hours_start, midnight) if now >= hours_start else midnight
+            online_since, online_secs = _online_time(events.get(aid, []), online_now, start, now)
+        hours = None if online_secs is None else online_secs / 3600
+        rows.append({
+            "name": name,
+            "online": online_now,
+            "open": len(open_by_rep[name]),
+            "snoozed": snoozed_by_rep[name],
+            "longest_wait": max(waits) if waits else None,
+            "frt": _median(frts),
+            "new_15m": sum(1 for c in mine if c["created_at"] > now - 900),
+            "new_1h": sum(1 for c in mine if c["created_at"] > now - 3600),
+            "today": len(mine),
+            "closed": closed_today,
+            "online_since": online_since,
+            "hours": hours,
+            "per_hour": (len(mine) / hours) if hours and hours >= 0.25 else None,
+            "csat": csat,
+        })
+    rows.sort(key=lambda r: (not r["online"], r["name"]))
+    missing = [n for n in roster if n not in admins]
+    return {"fetched_at": now, "rows": rows, "missing": missing, "activity_log": events is not None}
+
+
+def _mins(seconds):
+    if seconds is None:
+        return "n/a"
+    m = round(seconds / 60)
+    return f"{m} min" if m < 60 else f"{m // 60}h {m % 60:02d}m"
+
+
+def _render_rep_table(stats):
+    cols = [
+        ("Rep", "left"), ("Open", "center"), ("Snoozed", "center"), ("Longest wait", "center"),
+        ("First response", "center"), ("New 15m", "center"), ("New 1h", "center"), ("Today", "center"),
+        ("Closed today", "center"), ("Online since", "center"), ("Hours online", "center"),
+        ("Per hour", "center"), ("CSAT 30d", "center"),
+    ]
+    th = "".join(
+        f'<th style="text-align:{align};padding:10px 12px;color:#9E9E9E;font-size:14px;font-weight:600;'
+        f'border-bottom:1px solid #444C56;white-space:nowrap;">{label}</th>'
+        for label, align in cols
+    )
+    body = []
+    for r in stats["rows"]:
+        dot = "🟢" if r["online"] else "🔴"
+        name_color = "#E0E0E0" if r["online"] else "#9E9E9E"
+        since = (
+            datetime.fromtimestamp(r["online_since"], ET).strftime("%-I:%M %p") if r["online_since"]
+            else ("n/a" if r["hours"] is None else "Away")
+        )
+        if r["csat"] is None:
+            csat = "n/a"
+        elif r["csat"][0] is None:
+            csat = "No ratings"
+        else:
+            csat = f'{r["csat"][0]}% <span style="color:#9E9E9E;font-size:14px;">({r["csat"][1]})</span>'
+        wait_color = "#ff5252" if (r["longest_wait"] or 0) >= 3600 else ("#FFD740" if (r["longest_wait"] or 0) >= 1800 else "inherit")
+        cells = [
+            f'{dot} <span style="color:{name_color};font-weight:700;">{html.escape(r["name"])}</span>',
+            r["open"], r["snoozed"],
+            f'<span style="color:{wait_color};">{_mins(r["longest_wait"])}</span>' if r["longest_wait"] else "None",
+            _mins(r["frt"]), r["new_15m"], r["new_1h"], r["today"], r["closed"],
+            since,
+            "n/a" if r["hours"] is None else f'{r["hours"]:.1f}',
+            "n/a" if r["per_hour"] is None else f'{r["per_hour"]:.1f}',
+            csat,
+        ]
+        tds = "".join(
+            f'<td style="text-align:{align};padding:14px 12px;font-size:22px;border-bottom:1px solid #373E47;'
+            f'white-space:nowrap;">{cell}</td>'
+            for cell, (_, align) in zip(cells, cols)
+        )
+        body.append(f"<tr>{tds}</tr>")
+    st.markdown(
+        '<div style="overflow-x:auto;background:#2D333B;border:1px solid #444C56;border-radius:12px;'
+        'padding:6px 8px;margin-bottom:16px;">'
+        f'<table style="width:100%;border-collapse:collapse;color:#E0E0E0;"><thead><tr>{th}</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table></div>',
+        unsafe_allow_html=True,
+    )
+    notes = [
+        "Counts are conversations currently assigned to each rep. First response is today's median.",
+        f"Longest wait is the open conversation waiting longest on a reply (yellow 30 min, red 1 hour).",
+        f"Hours online count from {HOURS_START} AM ET or the first away mode change today. Per hour is today's tickets ÷ hours online.",
+        "CSAT is the share of 4 and 5 star ratings over the last 30 days, with the number of ratings.",
+    ]
+    if not stats["activity_log"]:
+        notes.append("Hours online need the Intercom activity log, which this token can't read yet.")
+    st.caption(" ".join(notes))
+
+
 def _card(label, value, sub=None, color="#E0E0E0"):
     sub_html = f'<div style="color:#9E9E9E;font-size:12px;margin-top:2px;">{sub}</div>' if sub else ""
     return (
@@ -261,6 +503,7 @@ def render():
     with col_refresh:
         if st.button("Refresh now", key="cap_refresh"):
             fetch_snapshot.clear()
+            fetch_rep_stats.clear()
 
     try:
         snap = fetch_snapshot(token, roster)
@@ -287,6 +530,13 @@ def render():
         unsafe_allow_html=True,
     )
 
+    st.markdown("### Reps")
+    try:
+        _render_rep_table(fetch_rep_stats(token, roster))
+    except requests.RequestException as e:
+        st.error(f"Could not load rep stats: {e}")
+
+    st.markdown("### Team")
     c1, c2, c3, c4 = st.columns(4)
     c1.markdown(
         _card(
@@ -303,17 +553,6 @@ def render():
         unsafe_allow_html=True,
     )
 
-    if snap["available"]:
-        load = snap.get("rep_load", {})
-        st.caption(
-            "Available mode: "
-            + ", ".join(
-                f"{n} ({load[n]['open']} open, {load[n]['snoozed']} snoozed)" if n in load else n
-                for n in snap["available"]
-            )
-        )
-    if snap["away"]:
-        st.caption("In away mode: " + ", ".join(snap["away"]))
     if snap["missing"]:
         st.caption("Not found in Intercom (check CAPACITY_REPS): " + ", ".join(snap["missing"]))
     st.caption(
