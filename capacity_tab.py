@@ -215,6 +215,7 @@ def snapshot(token, roster):
 ET = ZoneInfo("America/New_York")
 HOURS_START = 7  # hours online count from 7 AM ET unless away mode changed later than that
 CSAT_WINDOW = 30 * 24 * 3600
+CLOSE_WINDOW = 90 * 24 * 3600
 
 
 def _search_all(token, conditions, max_pages=10):
@@ -322,6 +323,22 @@ def _longest_wait(token, open_convs, now):
     return best
 
 
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def fetch_median_close(token, admin_id):
+    """(median seconds from created to closed, count) for conversations assigned to the rep and
+    closed in the last 90 days. Cached for 6 hours since a 90 day median barely moves."""
+    convs = _search_all(token, [
+        {"field": "admin_assignee_id", "operator": "=", "value": admin_id},
+        {"field": "statistics.last_close_at", "operator": ">", "value": int(time.time()) - CLOSE_WINDOW},
+    ], max_pages=10)
+    times = [
+        (c.get("statistics") or {}).get("time_to_last_close")
+        for c in convs
+        if (c.get("statistics") or {}).get("time_to_last_close") is not None
+    ]
+    return (_median(times), len(times)) if times else (None, 0)
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_rep_stats(token, roster):
     now = int(time.time())
@@ -384,7 +401,9 @@ def fetch_rep_stats(token, roster):
         results = {name: {k: f.result() for k, f in fs.items()} for name, fs in jobs.items()}
         events = f_events.result() if f_events else {}
         f_waits = {name: pool.submit(_longest_wait, token, res["open"], now) for name, res in results.items()}
+        f_close = {name: pool.submit(optional, fetch_median_close, token, a["id"]) for name, a in detailed}
         waits_by_rep = {name: f.result() for name, f in f_waits.items()}
+        close_by_rep = {name: f.result() for name, f in f_close.items()}
 
     rows = []
     for name, a in reps:
@@ -430,6 +449,7 @@ def fetch_rep_stats(token, roster):
             "hours": hours,
             "per_hour": (len(mine) / hours) if hours and hours >= 0.25 else None,
             "csat": csat,
+            "median_close": close_by_rep[name],
         })
     rows.sort(key=lambda r: (not r["online"], not r.get("details"), r["name"]))
     missing = [n for n in roster if n not in admins]
@@ -467,6 +487,21 @@ def _with_day_stats(stats):
     return {**stats, "rows": rows}
 
 
+def _duration(seconds):
+    if seconds is None:
+        return "n/a"
+    if seconds < 48 * 3600:
+        return _mins(seconds)
+    return f"{seconds / 86400:.1f} days"
+
+
+def _median_close_cell(r):
+    med = r.get("median_close")
+    if not med or med[0] is None:
+        return "n/a"
+    return f'{_duration(med[0])} <span style="color:#9E9E9E;font-size:14px;">({med[1]})</span>'
+
+
 def _mins(seconds):
     if seconds is None:
         return "n/a"
@@ -478,7 +513,7 @@ def _render_rep_table(stats):
     cols = [
         ("Rep", "left"), ("Open", "center"), ("Snoozed", "center"), ("Longest wait", "center"),
         ("First response", "center"), ("New 15m", "center"), ("New 1h", "center"), ("Today", "center"),
-        ("Closed today", "center"), ("Online since", "center"), ("Hours online", "center"),
+        ("Closed today", "center"), ("Median close 90d", "center"), ("Online since", "center"), ("Hours online", "center"),
         ("Per hour", "center"), ("CSAT 30d", "center"),
     ]
     th = "".join(
@@ -524,7 +559,7 @@ def _render_rep_table(stats):
             _mins(r["frt"]),
             "" if left else r["new_15m"],
             "" if left else r["new_1h"],
-            r["today"], r["closed"],
+            r["today"], r["closed"], _median_close_cell(r),
             since,
             "n/a" if r["hours"] is None else f'{r["hours"]:.1f}',
             "n/a" if r["per_hour"] is None else f'{r["per_hour"]:.1f}',
@@ -548,7 +583,7 @@ def _render_rep_table(stats):
         "Stats load for reps who are online or were assigned a ticket today. Reps who were online earlier today keep their stats from when they left, without reloading. Counts are conversations currently assigned to each rep. First response is today's median.",
         f"Longest wait is the open conversation waiting longest on a reply, not counting time spent snoozed (yellow 30 min, red 1 hour).",
         f"Hours online count from {HOURS_START} AM ET or the first away mode change today. Per hour is today's tickets ÷ hours online.",
-        "CSAT is the share of 4 and 5 star ratings over the last 30 days, with the number of ratings.",
+        "CSAT is the share of 4 and 5 star ratings over the last 30 days, with the number of ratings. Median close 90d is the median time from created to closed for conversations assigned to the rep and closed in the last 90 days (snoozed time included), with the count. It refreshes every 6 hours.",
     ]
     if not stats["activity_log"]:
         notes.append("Hours online need the Intercom activity log, which this token can't read yet.")
