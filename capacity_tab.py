@@ -287,6 +287,41 @@ def _median(values):
     return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
 
 
+UNSNOOZE_PARTS = {"timer_unsnooze", "unsnoozed"}
+WAIT_LOOKUPS = 5  # most conversations opened per rep to correct for snooze time
+
+
+def _last_unsnoozed_at(token, conversation_id):
+    """When the conversation last came back from snooze, or None if it never was snoozed."""
+    r = requests.get(f"{INTERCOM_API}/conversations/{conversation_id}", headers=_headers(token), timeout=20)
+    r.raise_for_status()
+    parts = (r.json().get("conversation_parts") or {}).get("conversation_parts", [])
+    times = [p["created_at"] for p in parts if p.get("part_type") in UNSNOOZE_PARTS]
+    return max(times) if times else None
+
+
+def _longest_wait(token, open_convs, now):
+    """Longest time an open conversation has been waiting on a reply, not counting snoozed time.
+
+    Intercom's waiting_since keeps running while a conversation is snoozed, so the clock is
+    restarted at the last unsnooze. Checks the oldest waits first and stops once no remaining
+    conversation could beat the current longest.
+    """
+    candidates = sorted((c for c in open_convs if c.get("waiting_since")), key=lambda c: c["waiting_since"])
+    best = None
+    for c in candidates[:WAIT_LOOKUPS]:
+        raw = now - c["waiting_since"]
+        if best is not None and raw <= best:
+            break
+        try:
+            unsnoozed = _last_unsnoozed_at(token, c["id"])
+        except requests.RequestException:
+            unsnoozed = None
+        start = max(c["waiting_since"], unsnoozed or 0)
+        best = max(best or 0, now - start)
+    return best
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_rep_stats(token, roster):
     now = int(time.time())
@@ -348,6 +383,8 @@ def fetch_rep_stats(token, roster):
         f_events = pool.submit(optional, _away_mode_events, token, window_start) if detailed else None
         results = {name: {k: f.result() for k, f in fs.items()} for name, fs in jobs.items()}
         events = f_events.result() if f_events else {}
+        f_waits = {name: pool.submit(_longest_wait, token, res["open"], now) for name, res in results.items()}
+        waits_by_rep = {name: f.result() for name, f in f_waits.items()}
 
     rows = []
     for name, a in reps:
@@ -363,7 +400,6 @@ def fetch_rep_stats(token, roster):
             for c in mine
             if (c.get("statistics") or {}).get("time_to_admin_reply") is not None
         ]
-        waits = [now - c["waiting_since"] for c in res["open"] if c.get("waiting_since")]
         closed_today = sum(
             1 for c in res["closed"]
             if str((c.get("statistics") or {}).get("last_closed_by_id")) == aid
@@ -384,7 +420,7 @@ def fetch_rep_stats(token, roster):
             "details": True,
             "open": len(res["open"]),
             "snoozed": res["snoozed"],
-            "longest_wait": max(waits) if waits else None,
+            "longest_wait": waits_by_rep[name],
             "frt": _median(frts),
             "new_15m": sum(1 for c in mine if c["created_at"] > now - 900),
             "new_1h": sum(1 for c in mine if c["created_at"] > now - 3600),
@@ -510,7 +546,7 @@ def _render_rep_table(stats):
     )
     notes = [
         "Stats load for reps who are online or were assigned a ticket today. Reps who were online earlier today keep their stats from when they left, without reloading. Counts are conversations currently assigned to each rep. First response is today's median.",
-        f"Longest wait is the open conversation waiting longest on a reply (yellow 30 min, red 1 hour).",
+        f"Longest wait is the open conversation waiting longest on a reply, not counting time spent snoozed (yellow 30 min, red 1 hour).",
         f"Hours online count from {HOURS_START} AM ET or the first away mode change today. Per hour is today's tickets ÷ hours online.",
         "CSAT is the share of 4 and 5 star ratings over the last 30 days, with the number of ratings.",
     ]
