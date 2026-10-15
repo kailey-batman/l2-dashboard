@@ -34,6 +34,7 @@ REP_REPORTS_DS = {
     "Lauren":  "61a5c03e-5996-4cac-aded-e24c0d9c219d",
     "Pablo":   "996932ce-2b89-4fc7-98c4-4a4cd36c875d",
     "Taliyah": "246330fe-cb49-4b73-8573-02698603b104",
+    "Will":    "7c592b19-3422-40a2-b4c6-3c726bff945e",
 }
 
 RATING_ORDER = ["Exceeds", "Meets", "Developing", "Needs work"]
