@@ -21,9 +21,13 @@ import plotly.graph_objects as go
 ROSTER_DATA_SOURCE_ID = "013dbf3f-7c65-49ca-a172-5a7c8d0ce551"
 ROSTER_DB_URL = "https://www.notion.so/d53e23efbfc241af878478eb90673eec"
 
+# Reps who have left the company. Kept out of every rollup, chart and per-rep
+# tab so their historic reports don't skew team stats. Their Notion pages are
+# left untouched; this only filters what the dashboard reads.
+DEPARTED_REPS = {"Mirah"}
+
 # Each rep's child "Coaching Reports" data source ID
 REP_REPORTS_DS = {
-    "Mirah":   "46697662-2ca4-4aea-8f90-0580668cb2f9",
     "Lena":    "70196692-afd9-4d39-85f6-5bcb07c01148",
     "Matthew": "1386f023-0cdc-49de-afe0-935a697c2d2f",
     "Dylan":   "2c404e9b-dad2-4fd5-8153-67bd7f96223e",
@@ -213,6 +217,8 @@ def fetch_roster_rows():
     rows = []
     for page in results:
         props = page.get("properties", {})
+        if _prop(props, "Name", default="") in DEPARTED_REPS:
+            continue
         rows.append({
             "Name": _prop(props, "Name", default=""),
             "Full name": _prop(props, "Full name", default=""),

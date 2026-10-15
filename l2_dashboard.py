@@ -1426,10 +1426,10 @@ _coaching_mode = _is_coaching_lead()
 # ── Query-param routing (like epdfeedback) ───────────────────────────────────
 _active_tab = st.query_params.get("tab", "results")
 # Public tabs: available to all authenticated users
-_valid_tabs = {"results", "trends", "reps"}
+_valid_tabs = {"results", "trends", "reps", "capacity"}
 # Manager tabs: coaching leads only
 if _coaching_mode:
-    _valid_tabs.update({"manager", "coaching", "capacity"})
+    _valid_tabs.update({"manager", "coaching"})
 # Admin tab: admins only
 if _admin_mode:
     _valid_tabs.add("admin")
@@ -1475,6 +1475,13 @@ _sb.append(
     'L2 Reps</a>'
 )
 
+_sb.append(
+    f'<a href="?tab=capacity" target="_self" class="{_nav_cls("capacity")}">'
+    f'<svg {_ICO}><path d="M12 14l4-4"/>'
+    '<path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>'
+    'Team Capacity</a>'
+)
+
 # ── Manager items (coaching leads only) ────────────────────────────────────
 if _coaching_mode:
     _sb.append('<div class="cst-sep"></div>')
@@ -1491,12 +1498,6 @@ if _coaching_mode:
         f'<svg {_ICO}><path d="M22 10v6M2 10l10-5 10 5-10 5z"/>'
         '<path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>'
         'L1 Coaching</a>'
-    )
-    _sb.append(
-        f'<a href="?tab=capacity" target="_self" class="{_nav_cls("capacity")}">'
-        f'<svg {_ICO}><path d="M12 14l4-4"/>'
-        '<path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>'
-        'Team Capacity</a>'
     )
 
 # ── Admin item ──────────────────────────────────────────────────────────────
@@ -2776,9 +2777,9 @@ if _coaching_mode and _active_tab == "coaching":
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PAGE — TEAM CAPACITY (coaching leads only)
+# PAGE — TEAM CAPACITY (public)
 # ═══════════════════════════════════════════════════════════════════════════
-if _coaching_mode and _active_tab == "capacity":
+if _active_tab == "capacity":
     capacity_tab.render()
 
 
