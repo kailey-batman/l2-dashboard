@@ -19,12 +19,15 @@ Requires INTERCOM_ACCESS_TOKEN on the Railway environment (read conversations + 
 """
 
 import html
+import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import pandas as pd
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
@@ -456,6 +459,212 @@ def fetch_rep_stats(token, roster):
     return {"fetched_at": now, "rows": rows, "missing": missing, "activity_log": events is not None}
 
 
+# ---------------------------------------------------------------------------
+# Half-hourly history. capacity_alert.py appends one row to the "Capacity Alerts"
+# tab every 30 minutes during business hours (8am-6pm ET, weekdays). This reads
+# it back; nothing here writes to the sheet.
+# ---------------------------------------------------------------------------
+
+GOOGLE_SHEET_ID = "1dRC3DkwOKjhdZveTp2xuSC_roeoxWOUcoP-XWsKQkeo"
+HISTORY_TAB = "Capacity Alerts"
+# Shorter than the 300s page autorefresh on purpose: a TTL equal to the refresh
+# interval never expires in time, so every other rerun would serve stale rows.
+HISTORY_TTL = 240
+
+
+def _history_worksheet():
+    """Read-only handle on the Capacity Alerts tab, or None if creds are missing."""
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+    except ImportError:
+        return None
+    scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+    raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    try:
+        if raw:
+            creds = Credentials.from_service_account_info(json.loads(raw), scopes=scopes)
+        elif os.path.exists("service_account.json"):
+            creds = Credentials.from_service_account_file("service_account.json", scopes=scopes)
+        else:
+            return None
+        ss = gspread.authorize(creds).open_by_key(GOOGLE_SHEET_ID)
+        return ss.worksheet(HISTORY_TAB)
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=HISTORY_TTL, show_spinner=False)
+def fetch_history():
+    """Every recorded half-hour check, oldest first, with an ET timestamp column.
+
+    Returns an empty frame when the tab is missing or unreadable, so the page
+    still renders its live section.
+    """
+    ws = _history_worksheet()
+    if ws is None:
+        return pd.DataFrame()
+    try:
+        rows = ws.get_all_records()
+    except Exception:
+        return pd.DataFrame()
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    if "checked_at" not in df.columns:
+        return pd.DataFrame()
+
+    df["checked_at"] = pd.to_numeric(df["checked_at"], errors="coerce")
+    df = df.dropna(subset=["checked_at"])
+    if df.empty:
+        return df
+    df["_when"] = (
+        pd.to_datetime(df["checked_at"], unit="s", utc=True).dt.tz_convert(ET)
+    )
+    # Blank score means no reps were available at that check.
+    for col in ("score", "backlog", "human_new", "fin_new", "reps_available",
+                "open_queue", "new_per_hour"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["band"] = df.get("band", "").astype(str)
+    return df.sort_values("_when").reset_index(drop=True)
+
+
+def _render_history_chart(df):
+    """Today's score at each half-hour check."""
+    st.markdown("### Today's score, every half hour")
+    if df.empty:
+        st.caption(
+            "No history recorded yet. The capacity alert job writes one row every "
+            "30 minutes between 8am and 6pm ET on weekdays."
+        )
+        return
+
+    today = datetime.now(ET).date()
+    day = df[df["_when"].dt.date == today]
+    if day.empty:
+        last = df["_when"].max()
+        st.caption(
+            f"Nothing recorded today yet. Most recent check was {last:%a %b %-d, %-I:%M %p} ET."
+        )
+        return
+
+    scored = day.dropna(subset=["score"])
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=day["_when"], y=day["score"],
+        mode="lines+markers",
+        line=dict(width=2, color="#9E9E9E"),
+        marker=dict(
+            size=9,
+            color=[BAND_COLORS.get(b, "#9E9E9E") for b in day["band"]],
+            line=dict(width=0),
+        ),
+        name="Score",
+        hovertemplate="%{x|%-I:%M %p} ET<br>Score %{y:.1f}<extra></extra>",
+    ))
+    fig.add_hline(y=RED_AT, line=dict(color=BAND_COLORS["red"], width=1, dash="dot"),
+                  annotation_text="Overwhelmed", annotation_position="top left",
+                  annotation_font_color=BAND_COLORS["red"])
+    fig.add_hline(y=YELLOW_AT, line=dict(color=BAND_COLORS["yellow"], width=1, dash="dot"),
+                  annotation_text="Watch", annotation_position="top left",
+                  annotation_font_color=BAND_COLORS["yellow"])
+
+    top = max(RED_AT, scored["score"].max() if not scored.empty else RED_AT)
+    fig.update_layout(
+        **_CHART_BASE, height=300, showlegend=False,
+        yaxis=dict(title="Score", gridcolor="#444C56", rangemode="tozero",
+                   range=[0, top * 1.15]),
+        xaxis=dict(gridcolor="#444C56", tickformat="%-I:%M"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    if not scored.empty:
+        peak = scored.loc[scored["score"].idxmax()]
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(_card("Checks today", len(day)), unsafe_allow_html=True)
+        c2.markdown(
+            _card("Peak today", f"{peak['score']:g}", f"{peak['_when']:%-I:%M %p} ET",
+                  BAND_COLORS.get(peak["band"], "#E0E0E0")),
+            unsafe_allow_html=True,
+        )
+        c3.markdown(_card("Average today", f"{scored['score'].mean():.1f}"),
+                    unsafe_allow_html=True)
+
+
+def _render_history_table(df):
+    """Full recorded history, newest first, in one scrollable table."""
+    st.markdown("### Full half-hourly history")
+    if df.empty:
+        st.caption("Nothing recorded yet.")
+        return
+
+    st.caption(
+        f"{len(df)} checks recorded, newest first. "
+        "Written every 30 minutes between 8am and 6pm ET on weekdays."
+    )
+
+    cols = [
+        ("When", "left"), ("Score", "center"), ("Band", "center"), ("Reps", "center"),
+        ("Open queue", "center"), ("New/hr", "center"), ("Backlog", "center"),
+        ("New 1h", "center"), ("Fin 1h", "center"), ("Alerted", "center"),
+    ]
+    th = "".join(
+        f'<th style="text-align:{align};padding:10px 12px;color:#9E9E9E;font-size:14px;'
+        f'font-weight:600;border-bottom:1px solid #444C56;white-space:nowrap;'
+        f'position:sticky;top:0;background:#2D333B;">{label}</th>'
+        for label, align in cols
+    )
+
+    def _num(v, fmt="{:g}"):
+        return "n/a" if v is None or pd.isna(v) else fmt.format(v)
+
+    body = []
+    for _, r in df.iloc[::-1].iterrows():
+        band = r.get("band", "")
+        color = BAND_COLORS.get(band, "#9E9E9E")
+        score = r.get("score")
+        score_txt = "no reps" if pd.isna(score) else f"{score:g}"
+        when_txt = format(r["_when"], "%a %b %-d, %-I:%M %p")
+        cells = [
+            f'<td style="padding:9px 12px;color:#E0E0E0;white-space:nowrap;">'
+            f'{html.escape(when_txt)}</td>',
+            f'<td style="padding:9px 12px;text-align:center;color:{color};'
+            f'font-weight:700;">{score_txt}</td>',
+            f'<td style="padding:9px 12px;text-align:center;">'
+            f'<span style="color:{color};">&#9679;</span> '
+            f'<span style="color:#9E9E9E;">{html.escape(band)}</span></td>',
+            f'<td style="padding:9px 12px;text-align:center;color:#E0E0E0;">{_num(r.get("reps_available"))}</td>',
+            f'<td style="padding:9px 12px;text-align:center;color:#E0E0E0;">{_num(r.get("open_queue"))}</td>',
+            f'<td style="padding:9px 12px;text-align:center;color:#E0E0E0;">{_num(r.get("new_per_hour"), "{:.1f}")}</td>',
+            f'<td style="padding:9px 12px;text-align:center;color:#E0E0E0;">{_num(r.get("backlog"))}</td>',
+            f'<td style="padding:9px 12px;text-align:center;color:#E0E0E0;">{_num(r.get("human_new"))}</td>',
+            f'<td style="padding:9px 12px;text-align:center;color:#E0E0E0;">{_num(r.get("fin_new"))}</td>',
+            f'<td style="padding:9px 12px;text-align:center;color:#9E9E9E;">'
+            f'{html.escape(str(r.get("alert_sent", "")))}</td>',
+        ]
+        body.append(
+            f'<tr style="border-bottom:1px solid #373E47;">{"".join(cells)}</tr>'
+        )
+
+    st.markdown(
+        f'<div style="max-height:520px;overflow-y:auto;border:1px solid #444C56;'
+        f'border-radius:10px;">'
+        f'<table style="width:100%;border-collapse:collapse;font-size:14px;">'
+        f'<thead><tr>{th}</tr></thead><tbody>{"".join(body)}</tbody></table></div>',
+        unsafe_allow_html=True,
+    )
+
+    st.download_button(
+        "Download history as CSV",
+        df.iloc[::-1].drop(columns=["_when"]).to_csv(index=False).encode(),
+        file_name="capacity_history.csv",
+        mime="text/csv",
+        key="cap_history_csv",
+    )
+
+
 @st.cache_resource
 def _day_memory():
     """Last stats seen for each rep today, kept in server memory across page loads."""
@@ -645,11 +854,15 @@ def render():
         if st.button("Refresh now", key="cap_refresh"):
             fetch_snapshot.clear()
             fetch_rep_stats.clear()
+            fetch_history.clear()
 
     try:
         snap = fetch_snapshot(token, roster)
     except requests.RequestException as e:
         st.error(f"Could not load Intercom data: {e}")
+        # The half-hourly history comes from Sheets, so it still renders when
+        # Intercom is the thing that's down.
+        _render_history_table(fetch_history())
         _render_calibration()
         return
 
@@ -670,6 +883,9 @@ def render():
         f'</div>',
         unsafe_allow_html=True,
     )
+
+    history = fetch_history()
+    _render_history_chart(history)
 
     st.markdown("### Reps")
     try:
@@ -701,5 +917,7 @@ def render():
         + datetime.fromtimestamp(snap["fetched_at"], ZoneInfo("America/New_York")).strftime("%-I:%M %p ET")
         + ". Data refreshes every 5 minutes."
     )
+
+    _render_history_table(history)
 
     _render_calibration()
