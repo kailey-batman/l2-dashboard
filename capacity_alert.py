@@ -193,8 +193,13 @@ def main():
 
     token = os.environ.get("INTERCOM_ACCESS_TOKEN")
     webhook = os.environ.get("SLACK_CAPACITY_WEBHOOK_URL")
-    if not token or (not webhook and not dry_run):
-        sys.exit("INTERCOM_ACCESS_TOKEN and SLACK_CAPACITY_WEBHOOK_URL must be set.")
+    if not token:
+        sys.exit("INTERCOM_ACCESS_TOKEN must be set.")
+    # Recording and alerting are independent. Without a webhook the run still
+    # appends its half-hourly row to the sheet, it just doesn't post to Slack.
+    alerting = bool(webhook) or dry_run
+    if not alerting:
+        print("No SLACK_CAPACITY_WEBHOOK_URL set, recording only.")
 
     snap = snapshot(token, tuple(_roster()))
     score, band = compute_score(snap)
@@ -205,7 +210,7 @@ def main():
     rising = RANK[band] > RANK[prev]
     recovered = band == "green" and prev != "green"
     message = None
-    if rising or recovered:
+    if alerting and (rising or recovered):
         summary = None
         if band != "green":
             try:
